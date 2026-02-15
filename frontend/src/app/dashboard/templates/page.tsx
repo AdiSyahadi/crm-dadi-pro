@@ -1,0 +1,205 @@
+'use client';
+
+import { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import api from '@/lib/api';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Badge } from '@/components/ui/badge';
+import { Card, CardContent } from '@/components/ui/card';
+import { Textarea } from '@/components/ui/textarea';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog';
+import { Plus, FileText, Loader2, Trash2, ToggleLeft, ToggleRight, Edit } from 'lucide-react';
+import { toast } from 'sonner';
+import { cn } from '@/lib/utils';
+
+export default function TemplatesPage() {
+  const queryClient = useQueryClient();
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [form, setForm] = useState({ name: '', category: '', content: '' });
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['templates'],
+    queryFn: async () => {
+      const { data } = await api.get('/templates?limit=50');
+      return data;
+    },
+  });
+
+  const templates = data?.data || [];
+
+  const createMutation = useMutation({
+    mutationFn: async (input: typeof form) => {
+      await api.post('/templates', input);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['templates'] });
+      setDialogOpen(false);
+      setForm({ name: '', category: '', content: '' });
+      toast.success('Template berhasil dibuat');
+    },
+    onError: (err: any) => toast.error(err.response?.data?.error?.message || 'Gagal'),
+  });
+
+  const toggleMutation = useMutation({
+    mutationFn: async (id: string) => {
+      await api.post(`/templates/${id}/toggle`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['templates'] });
+      toast.success('Status template diperbarui');
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: string) => {
+      await api.delete(`/templates/${id}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['templates'] });
+      toast.success('Template dihapus');
+    },
+  });
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold">Template Pesan</h1>
+          <p className="text-sm text-muted-foreground">Kelola template pesan untuk broadcast dan quick reply</p>
+        </div>
+        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+          <DialogTrigger asChild>
+            <Button>
+              <Plus className="h-4 w-4 mr-2" />
+              Buat Template
+            </Button>
+          </DialogTrigger>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Buat Template Baru</DialogTitle>
+            </DialogHeader>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                createMutation.mutate(form);
+              }}
+              className="space-y-4"
+            >
+              <div className="space-y-2">
+                <Label>Nama Template</Label>
+                <Input
+                  placeholder="Welcome Message"
+                  value={form.name}
+                  onChange={(e) => setForm({ ...form, name: e.target.value })}
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Kategori</Label>
+                <Input
+                  placeholder="greeting, promo, follow-up"
+                  value={form.category}
+                  onChange={(e) => setForm({ ...form, category: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Isi Pesan</Label>
+                <Textarea
+                  placeholder="Halo {{name}}, terima kasih telah menghubungi kami..."
+                  rows={5}
+                  value={form.content}
+                  onChange={(e) => setForm({ ...form, content: e.target.value })}
+                  required
+                />
+                <p className="text-xs text-muted-foreground">Gunakan {"{{variable}}"} untuk variabel dinamis</p>
+              </div>
+              <Button type="submit" className="w-full" disabled={createMutation.isPending}>
+                {createMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                Simpan Template
+              </Button>
+            </form>
+          </DialogContent>
+        </Dialog>
+      </div>
+
+      {isLoading ? (
+        <div className="flex justify-center py-12">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      ) : templates.length === 0 ? (
+        <Card>
+          <CardContent className="flex flex-col items-center justify-center py-16">
+            <FileText className="h-12 w-12 text-muted-foreground/30 mb-3" />
+            <p className="text-muted-foreground">Belum ada template</p>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {templates.map((tpl: any) => (
+            <Card key={tpl.id} className="hover:shadow-md transition-shadow">
+              <CardContent className="p-4">
+                <div className="flex items-start justify-between mb-2">
+                  <div className="flex-1 min-w-0">
+                    <h3 className="text-sm font-semibold truncate">{tpl.name}</h3>
+                    {tpl.category && (
+                      <Badge variant="outline" className="text-[10px] mt-1">{tpl.category}</Badge>
+                    )}
+                  </div>
+                  <Badge
+                    variant="secondary"
+                    className={cn(
+                      'text-[10px] shrink-0',
+                      tpl.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500'
+                    )}
+                  >
+                    {tpl.is_active ? 'Aktif' : 'Nonaktif'}
+                  </Badge>
+                </div>
+                <div className="bg-muted/50 rounded-lg p-3 mt-3 mb-3">
+                  <p className="text-xs text-muted-foreground whitespace-pre-wrap line-clamp-4">{tpl.content}</p>
+                </div>
+                <div className="flex items-center justify-between">
+                  <p className="text-[10px] text-muted-foreground">
+                    Digunakan {tpl.usage_count || 0}x
+                  </p>
+                  <div className="flex items-center gap-1">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7"
+                      onClick={() => toggleMutation.mutate(tpl.id)}
+                    >
+                      {tpl.is_active ? (
+                        <ToggleRight className="h-4 w-4 text-emerald-500" />
+                      ) : (
+                        <ToggleLeft className="h-4 w-4 text-muted-foreground" />
+                      )}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 text-destructive"
+                      onClick={() => {
+                        if (confirm('Hapus template ini?')) deleteMutation.mutate(tpl.id);
+                      }}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}

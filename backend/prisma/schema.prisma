@@ -1,0 +1,830 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+}
+
+// ============================================
+// ORGANIZATION (Multi-Tenant Root)
+// ============================================
+
+model Organization {
+  id   String @id @default(uuid())
+  name String
+  slug String @unique
+
+  plan            Plan    @default(FREE)
+  wa_api_base_url String?
+  wa_api_key      String? @db.Text
+  wa_organization_id String?
+
+  max_users              Int @default(3)
+  max_contacts           Int @default(500)
+  max_broadcasts_per_month Int @default(10)
+
+  settings Json?
+
+  is_active     Boolean   @default(true)
+  trial_ends_at DateTime?
+  created_at    DateTime  @default(now())
+  updated_at    DateTime  @updatedAt
+
+  users          User[]
+  teams          Team[]
+  wa_instances   WAInstance[]
+  contacts       Contact[]
+  tags           Tag[]
+  conversations  Conversation[]
+  broadcasts     Broadcast[]
+  templates      MessageTemplate[]
+  automations    Automation[]
+  webhook_configs WebhookConfig[]
+  deals          Deal[]
+  activity_logs  ActivityLog[]
+
+  @@map("organizations")
+}
+
+enum Plan {
+  FREE
+  STARTER
+  PROFESSIONAL
+  ENTERPRISE
+}
+
+// ============================================
+// USER
+// ============================================
+
+model User {
+  id              String @id @default(uuid())
+  organization_id String
+  organization    Organization @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+
+  email         String
+  password_hash String
+  name          String
+  avatar_url    String?
+  phone         String?
+  role          UserRole @default(AGENT)
+
+  is_active   Boolean  @default(true)
+  is_online   Boolean  @default(false)
+  last_seen_at DateTime?
+  email_verified_at DateTime?
+
+  preferences         Json?
+  notification_settings Json?
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  refresh_tokens       RefreshToken[]
+  team_members         TeamMember[]
+  notifications        Notification[]
+  activity_logs        ActivityLog[]
+  sent_messages        Message[]       @relation("SentByUser")
+  assigned_conversations Conversation[] @relation("AssignedToUser")
+  conversation_assignments ConversationAssignment[] @relation("AssignedUser")
+  assigned_by_assignments  ConversationAssignment[] @relation("AssignedByUser")
+  resolved_conversations   Conversation[] @relation("ResolvedByUser")
+  assigned_deals       Deal[]          @relation("DealAssignedTo")
+  created_broadcasts   Broadcast[]     @relation("BroadcastCreatedBy")
+  created_templates    MessageTemplate[] @relation("TemplateCreatedBy")
+
+  @@unique([organization_id, email])
+  @@map("users")
+}
+
+enum UserRole {
+  OWNER
+  ADMIN
+  SUPERVISOR
+  AGENT
+}
+
+// ============================================
+// REFRESH TOKEN
+// ============================================
+
+model RefreshToken {
+  id         String @id @default(uuid())
+  user_id    String
+  user       User   @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  token_hash  String   @unique
+  device_info String?
+  ip_address  String?
+  expires_at  DateTime
+  revoked_at  DateTime?
+
+  created_at DateTime @default(now())
+
+  @@map("refresh_tokens")
+}
+
+// ============================================
+// TEAM
+// ============================================
+
+model Team {
+  id              String @id @default(uuid())
+  organization_id String
+  organization    Organization @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+
+  name            String
+  description     String?
+  color           String?
+  auto_assign     Boolean       @default(false)
+  assign_strategy AssignStrategy @default(ROUND_ROBIN)
+  max_open_chats  Int           @default(20)
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  members                TeamMember[]
+  assigned_conversations Conversation[] @relation("AssignedToTeam")
+  conversation_assignments ConversationAssignment[] @relation("AssignedTeam")
+
+  @@unique([organization_id, name])
+  @@map("teams")
+}
+
+enum AssignStrategy {
+  ROUND_ROBIN
+  LEAST_BUSY
+  MANUAL
+}
+
+model TeamMember {
+  id        String  @id @default(uuid())
+  team_id   String
+  team      Team    @relation(fields: [team_id], references: [id], onDelete: Cascade)
+  user_id   String
+  user      User    @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  is_leader Boolean  @default(false)
+  joined_at DateTime @default(now())
+
+  @@unique([team_id, user_id])
+  @@map("team_members")
+}
+
+// ============================================
+// WA INSTANCE
+// ============================================
+
+model WAInstance {
+  id              String @id @default(uuid())
+  organization_id String
+  organization    Organization @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+
+  wa_instance_id  String
+  name            String
+  phone_number    String?
+  wa_display_name String?
+  status          InstanceStatus @default(DISCONNECTED)
+
+  health_score        Int?
+  daily_message_count Int @default(0)
+  daily_limit         Int @default(50)
+  warming_phase       String?
+
+  is_default     Boolean   @default(false)
+  last_synced_at DateTime?
+  connected_at   DateTime?
+  created_at     DateTime  @default(now())
+  updated_at     DateTime  @updatedAt
+
+  contacts      Contact[]
+  conversations Conversation[]
+  messages      Message[]
+  broadcasts    Broadcast[]
+
+  @@unique([organization_id, wa_instance_id])
+  @@map("wa_instances")
+}
+
+enum InstanceStatus {
+  CONNECTED
+  DISCONNECTED
+  CONNECTING
+  QR_PENDING
+}
+
+// ============================================
+// CONTACT
+// ============================================
+
+model Contact {
+  id              String @id @default(uuid())
+  organization_id String
+  organization    Organization @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  instance_id     String?
+  instance        WAInstance? @relation(fields: [instance_id], references: [id])
+
+  wa_contact_id String?
+  phone_number  String
+  name          String?
+  email         String?
+  avatar_url    String?
+
+  company    String?
+  job_title  String?
+  address    String?
+  city       String?
+  notes      String? @db.Text
+  source     ContactSource @default(WHATSAPP)
+  stage      ContactStage  @default(NEW)
+
+  custom_fields Json?
+
+  is_subscribed    Boolean   @default(true)
+  last_message_at  DateTime?
+  first_message_at DateTime?
+  total_messages   Int       @default(0)
+
+  is_blocked     Boolean @default(false)
+  blocked_reason String?
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  contact_tags  ContactTag[]
+  conversations Conversation[]
+  broadcast_recipients BroadcastRecipient[]
+  deals         Deal[]
+
+  @@unique([organization_id, phone_number])
+  @@index([organization_id, stage])
+  @@index([organization_id, last_message_at])
+  @@index([phone_number])
+  @@map("contacts")
+}
+
+enum ContactSource {
+  WHATSAPP
+  MANUAL
+  IMPORT
+  API
+  WEBSITE
+}
+
+enum ContactStage {
+  NEW
+  LEAD
+  QUALIFIED
+  CUSTOMER
+  VIP
+  CHURNED
+}
+
+// ============================================
+// TAG
+// ============================================
+
+model Tag {
+  id              String @id @default(uuid())
+  organization_id String
+  organization    Organization @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+
+  name        String
+  color       String?
+  description String?
+
+  created_at DateTime @default(now())
+
+  contact_tags ContactTag[]
+
+  @@unique([organization_id, name])
+  @@map("tags")
+}
+
+model ContactTag {
+  contact_id  String
+  contact     Contact @relation(fields: [contact_id], references: [id], onDelete: Cascade)
+  tag_id      String
+  tag         Tag     @relation(fields: [tag_id], references: [id], onDelete: Cascade)
+
+  assigned_at DateTime @default(now())
+
+  @@id([contact_id, tag_id])
+  @@map("contact_tags")
+}
+
+// ============================================
+// CONVERSATION
+// ============================================
+
+model Conversation {
+  id              String @id @default(uuid())
+  organization_id String
+  organization    Organization @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  instance_id     String
+  instance        WAInstance @relation(fields: [instance_id], references: [id])
+  contact_id      String
+  contact         Contact @relation(fields: [contact_id], references: [id])
+
+  chat_jid String
+
+  status   ConversationStatus @default(OPEN)
+  priority Priority           @default(MEDIUM)
+
+  unread_count   Int @default(0)
+  total_messages Int @default(0)
+
+  last_message_at        DateTime?
+  last_message_preview   String?
+  last_message_direction MessageDirection?
+
+  assigned_to_user_id String?
+  assigned_to_user    User? @relation("AssignedToUser", fields: [assigned_to_user_id], references: [id])
+  assigned_to_team_id String?
+  assigned_to_team    Team? @relation("AssignedToTeam", fields: [assigned_to_team_id], references: [id])
+
+  resolved_at    DateTime?
+  resolved_by_id String?
+  resolved_by    User?    @relation("ResolvedByUser", fields: [resolved_by_id], references: [id])
+
+  first_response_at DateTime?
+  sla_deadline_at   DateTime?
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  messages    Message[]
+  assignments ConversationAssignment[]
+  labels      ConversationLabel[]
+  deals       Deal[]
+
+  @@unique([organization_id, chat_jid, instance_id])
+  @@index([organization_id, status, last_message_at])
+  @@index([organization_id, assigned_to_user_id])
+  @@map("conversations")
+}
+
+enum ConversationStatus {
+  OPEN
+  PENDING
+  RESOLVED
+  CLOSED
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum MessageDirection {
+  INCOMING
+  OUTGOING
+}
+
+// ============================================
+// MESSAGE
+// ============================================
+
+model Message {
+  id              String @id @default(uuid())
+  organization_id String
+  conversation_id String
+  conversation    Conversation @relation(fields: [conversation_id], references: [id], onDelete: Cascade)
+  instance_id     String
+  instance        WAInstance @relation(fields: [instance_id], references: [id])
+
+  wa_message_id String?
+
+  direction    MessageDirection
+  message_type MessageType @default(TEXT)
+  content      String?     @db.Text
+  caption      String?
+
+  media_url        String?
+  media_local_path String?
+  media_mime_type  String?
+  media_size       Int?
+  filename         String?
+
+  latitude         Float?
+  longitude        Float?
+  location_name    String?
+  location_address String?
+
+  status        MessageStatus @default(PENDING)
+  error_message String?
+
+  sent_by_user_id   String?
+  sent_by_user      User?   @relation("SentByUser", fields: [sent_by_user_id], references: [id])
+  is_from_broadcast Boolean @default(false)
+  broadcast_id      String?
+  is_internal_note  Boolean @default(false)
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@index([conversation_id, created_at])
+  @@index([organization_id, created_at])
+  @@index([wa_message_id])
+  @@map("messages")
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  VIDEO
+  AUDIO
+  DOCUMENT
+  LOCATION
+  STICKER
+  CONTACT_CARD
+  REACTION
+  POLL
+  VIEW_ONCE
+  SYSTEM
+  OTHER
+}
+
+enum MessageStatus {
+  PENDING
+  SENT
+  DELIVERED
+  READ
+  FAILED
+  RECEIVED
+}
+
+// ============================================
+// CONVERSATION ASSIGNMENT
+// ============================================
+
+model ConversationAssignment {
+  id              String @id @default(uuid())
+  conversation_id String
+  conversation    Conversation @relation(fields: [conversation_id], references: [id], onDelete: Cascade)
+
+  user_id String?
+  user    User?   @relation("AssignedUser", fields: [user_id], references: [id])
+  team_id String?
+  team    Team?   @relation("AssignedTeam", fields: [team_id], references: [id])
+
+  assigned_by_id String?
+  assigned_by    User?   @relation("AssignedByUser", fields: [assigned_by_id], references: [id])
+
+  reason        String?
+  assigned_at   DateTime @default(now())
+  unassigned_at DateTime?
+  is_active     Boolean  @default(true)
+
+  @@index([conversation_id, is_active])
+  @@map("conversation_assignments")
+}
+
+// ============================================
+// CONVERSATION LABEL
+// ============================================
+
+model ConversationLabel {
+  id              String @id @default(uuid())
+  conversation_id String
+  conversation    Conversation @relation(fields: [conversation_id], references: [id], onDelete: Cascade)
+
+  label String
+  color String?
+
+  @@unique([conversation_id, label])
+  @@map("conversation_labels")
+}
+
+// ============================================
+// MESSAGE TEMPLATE
+// ============================================
+
+model MessageTemplate {
+  id              String @id @default(uuid())
+  organization_id String
+  organization    Organization @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+
+  name       String
+  category   String?
+  content    String @db.Text
+  media_url  String?
+  media_type MessageType?
+
+  variables Json?
+
+  is_active     Boolean @default(true)
+  usage_count   Int     @default(0)
+  created_by_id String?
+  created_by    User?   @relation("TemplateCreatedBy", fields: [created_by_id], references: [id])
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  broadcasts Broadcast[]
+
+  @@unique([organization_id, name])
+  @@map("message_templates")
+}
+
+// ============================================
+// BROADCAST
+// ============================================
+
+model Broadcast {
+  id              String @id @default(uuid())
+  organization_id String
+  organization    Organization @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  instance_id     String
+  instance        WAInstance @relation(fields: [instance_id], references: [id])
+  template_id     String?
+  template        MessageTemplate? @relation(fields: [template_id], references: [id])
+
+  name            String
+  message_content String @db.Text
+  media_url       String?
+  media_type      MessageType?
+
+  status       BroadcastStatus @default(DRAFT)
+  scheduled_at DateTime?
+  started_at   DateTime?
+  completed_at DateTime?
+
+  total_recipients Int @default(0)
+  sent_count       Int @default(0)
+  delivered_count  Int @default(0)
+  read_count       Int @default(0)
+  failed_count     Int @default(0)
+
+  delay_min_seconds Int @default(5)
+  delay_max_seconds Int @default(15)
+
+  created_by_id String?
+  created_by    User?   @relation("BroadcastCreatedBy", fields: [created_by_id], references: [id])
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  recipients BroadcastRecipient[]
+
+  @@map("broadcasts")
+}
+
+enum BroadcastStatus {
+  DRAFT
+  SCHEDULED
+  SENDING
+  PAUSED
+  COMPLETED
+  CANCELLED
+  FAILED
+}
+
+model BroadcastRecipient {
+  id           String @id @default(uuid())
+  broadcast_id String
+  broadcast    Broadcast @relation(fields: [broadcast_id], references: [id], onDelete: Cascade)
+  contact_id   String
+  contact      Contact @relation(fields: [contact_id], references: [id])
+
+  phone_number         String
+  personalized_message String? @db.Text
+
+  status        MessageStatus @default(PENDING)
+  wa_message_id String?
+  error_message String?
+  sent_at       DateTime?
+  delivered_at  DateTime?
+  read_at       DateTime?
+
+  @@index([broadcast_id, status])
+  @@map("broadcast_recipients")
+}
+
+// ============================================
+// DEAL / CLOSING (Sales Pipeline)
+// ============================================
+
+model Deal {
+  id              String @id @default(uuid())
+  organization_id String
+  organization    Organization @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  contact_id      String
+  contact         Contact @relation(fields: [contact_id], references: [id])
+  conversation_id String?
+  conversation    Conversation? @relation(fields: [conversation_id], references: [id])
+
+  title       String
+  description String? @db.Text
+  deal_number String  @unique
+
+  stage    DealStage @default(QUALIFICATION)
+  pipeline String    @default("default")
+
+  value           Decimal  @default(0) @db.Decimal(15, 2)
+  currency        String   @default("IDR")
+  win_probability Int      @default(0)
+
+  assigned_to_id String?
+  assigned_to    User?   @relation("DealAssignedTo", fields: [assigned_to_id], references: [id])
+
+  expected_close_date DateTime?
+  actual_close_date   DateTime?
+
+  closed_status DealClosedStatus?
+  lost_reason   String?
+  won_notes     String? @db.Text
+
+  products      Json?
+  source        String?
+  custom_fields Json?
+  is_archived   Boolean @default(false)
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  activities DealActivity[]
+
+  @@index([organization_id, stage])
+  @@index([organization_id, assigned_to_id])
+  @@index([organization_id, closed_status])
+  @@index([organization_id, expected_close_date])
+  @@map("deals")
+}
+
+enum DealStage {
+  QUALIFICATION
+  PROPOSAL
+  NEGOTIATION
+  CLOSING
+  WON
+  LOST
+}
+
+enum DealClosedStatus {
+  WON
+  LOST
+}
+
+model DealActivity {
+  id      String @id @default(uuid())
+  deal_id String
+  deal    Deal   @relation(fields: [deal_id], references: [id], onDelete: Cascade)
+
+  user_id     String?
+  type        DealActivityType
+  title       String
+  description String?
+  metadata    Json?
+
+  created_at DateTime @default(now())
+
+  @@index([deal_id, created_at])
+  @@map("deal_activities")
+}
+
+enum DealActivityType {
+  STAGE_CHANGED
+  VALUE_CHANGED
+  ASSIGNED
+  NOTE_ADDED
+  PRODUCT_ADDED
+  WON
+  LOST
+  REOPENED
+  CREATED
+}
+
+// ============================================
+// AUTOMATION
+// ============================================
+
+model Automation {
+  id              String @id @default(uuid())
+  organization_id String
+  organization    Organization @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+
+  name        String
+  description String?
+
+  trigger_type   AutomationTrigger
+  trigger_config Json?
+
+  action_type   AutomationAction
+  action_config Json?
+
+  is_active       Boolean @default(true)
+  priority        Int     @default(0)
+  execution_count Int     @default(0)
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@map("automations")
+}
+
+enum AutomationTrigger {
+  MESSAGE_RECEIVED
+  KEYWORD_MATCH
+  FIRST_MESSAGE
+  CONTACT_CREATED
+  NO_REPLY_TIMEOUT
+  BUSINESS_HOURS
+}
+
+enum AutomationAction {
+  SEND_REPLY
+  ASSIGN_TEAM
+  ASSIGN_USER
+  ADD_TAG
+  SET_STAGE
+  SEND_NOTIFICATION
+  WEBHOOK
+}
+
+// ============================================
+// NOTIFICATION
+// ============================================
+
+model Notification {
+  id      String @id @default(uuid())
+  user_id String
+  user    User   @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  type    NotificationType
+  title   String
+  body    String?
+  data    Json?
+
+  is_read Boolean   @default(false)
+  read_at DateTime?
+
+  created_at DateTime @default(now())
+
+  @@index([user_id, is_read, created_at])
+  @@map("notifications")
+}
+
+enum NotificationType {
+  NEW_MESSAGE
+  ASSIGNED
+  MENTION
+  BROADCAST_COMPLETED
+  INSTANCE_DISCONNECTED
+  SYSTEM
+}
+
+// ============================================
+// ACTIVITY LOG (Audit Trail)
+// ============================================
+
+model ActivityLog {
+  id              String @id @default(uuid())
+  organization_id String
+  organization    Organization @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+
+  user_id    String?
+  user       User?   @relation(fields: [user_id], references: [id])
+  contact_id String?
+
+  action      String
+  entity_type String
+  entity_id   String?
+
+  details    Json?
+  ip_address String?
+
+  created_at DateTime @default(now())
+
+  @@index([organization_id, created_at])
+  @@index([entity_type, entity_id])
+  @@map("activity_logs")
+}
+
+// ============================================
+// WEBHOOK CONFIG
+// ============================================
+
+model WebhookConfig {
+  id              String @id @default(uuid())
+  organization_id String
+  organization    Organization @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+
+  wa_instance_id  String
+  webhook_url     String
+  webhook_secret  String?
+  events          Json?
+
+  is_active        Boolean   @default(true)
+  last_received_at DateTime?
+  failure_count    Int       @default(0)
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@unique([organization_id, wa_instance_id])
+  @@map("webhook_configs")
+}
