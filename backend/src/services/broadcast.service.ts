@@ -64,19 +64,20 @@ export class BroadcastService {
     });
     if (!instance) throw AppError.notFound('WA Instance not found');
 
-    // Get contacts
+    // Get contacts with valid phone numbers
     const contacts = await prisma.contact.findMany({
       where: {
         id: { in: input.recipient_contact_ids },
         organization_id: organizationId,
         is_subscribed: true,
         is_blocked: false,
+        phone_number: { not: '' },
       },
       select: { id: true, phone_number: true },
     });
 
     if (contacts.length === 0) {
-      throw AppError.badRequest('No valid recipients found');
+      throw AppError.badRequest('Tidak ada penerima dengan nomor HP valid.');
     }
 
     const broadcast = await prisma.broadcast.create({
@@ -235,11 +236,17 @@ export class BroadcastService {
           data: { sent_count: { increment: 1 } },
         });
       } catch (error: any) {
+        console.error(`📤 Broadcast send failed to ${recipient.phone_number}:`, JSON.stringify(error.response?.data || error.message));
+        const rawErr = error.response?.data?.error;
+        const errMsg = typeof rawErr === 'string' ? rawErr : (error.message || String(rawErr || ''));
+        const isDailyLimit = errMsg.includes('Daily message limit') || error.response?.data?.code === 'INSTANCE_003';
+        const isDisconnected = errMsg.includes('not connected') || error.response?.data?.code === 'INSTANCE_002';
+
         await prisma.broadcastRecipient.update({
           where: { id: recipient.id },
           data: {
             status: 'FAILED',
-            error_message: error.message,
+            error_message: errMsg.slice(0, 500),
           },
         });
 
@@ -247,6 +254,17 @@ export class BroadcastService {
           where: { id: broadcastId },
           data: { failed_count: { increment: 1 } },
         });
+
+        // Fatal errors: stop entire broadcast, no point continuing
+        if (isDailyLimit || isDisconnected) {
+          const reason = isDailyLimit ? 'Daily message limit reached' : 'Instance not connected';
+          console.error(`⛔ Broadcast ${broadcastId} stopped: ${reason}`);
+          await prisma.broadcast.update({
+            where: { id: broadcastId },
+            data: { status: 'PAUSED' },
+          });
+          return; // Exit processBroadcast entirely
+        }
       }
 
       // Random delay between messages (anti-ban)

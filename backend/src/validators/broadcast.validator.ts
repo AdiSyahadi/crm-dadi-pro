@@ -5,7 +5,7 @@ export const createBroadcastSchema = z.object({
   instance_id: z.string().uuid(),
   template_id: z.string().uuid().optional(),
   message_content: z.string().min(1),
-  media_url: z.string().url().optional(),
+  media_url: z.string().min(1).optional(),
   media_type: z.enum(['IMAGE', 'VIDEO', 'AUDIO', 'DOCUMENT']).optional(),
   scheduled_at: z.string().datetime().optional(),
   delay_min_seconds: z.number().min(3).max(60).default(5),

@@ -63,10 +63,6 @@ export class WebhookService {
     const organizationId = instance.organization.id;
     const chatJid = data.chat_jid || data.from || data.key?.remoteJid || (data.phone_number ? `${data.phone_number}@s.whatsapp.net` : null);
 
-    // Use phone_number field directly from webhook payload (new field from API upgrade)
-    // For @lid contacts, phone_number may be null — use JID as fallback identifier
-    const phone = data.phone_number || chatJid?.replace(/@s\.whatsapp\.net$/, '').replace(/@g\.us$/, '').replace(/@lid$/, '') || '';
-
     if (!chatJid) {
       console.warn('Webhook: Missing chat_jid');
       return;
@@ -74,6 +70,33 @@ export class WebhookService {
 
     // Skip group chats
     if (chatJid.includes('@g.us')) return;
+
+    // Determine real phone number:
+    // 1. Use data.phone_number from webhook (WA API provides resolved phone when available)
+    // 2. For @s.whatsapp.net JIDs, extract phone from JID
+    // 3. For @lid JIDs without phone_number, try resolveLid endpoint
+    // 4. If unresolvable → skip (don't create contact with LID as phone)
+    let phone = data.phone_number || '';
+
+    if (!phone && chatJid.endsWith('@s.whatsapp.net')) {
+      phone = chatJid.replace(/@s\.whatsapp\.net$/, '');
+    }
+
+    if (!phone && chatJid.endsWith('@lid')) {
+      try {
+        const { WAApiClient } = require('./wa-api.client');
+        const waClient = await WAApiClient.forOrganization(organizationId);
+        const resolved = await waClient.resolveLid(chatJid, instance.wa_instance_id);
+        if (resolved?.phone_number) {
+          phone = resolved.phone_number;
+        }
+      } catch {
+        // Could not resolve — skip this message
+      }
+    }
+
+    if (!phone) return; // Unresolvable LID — skip
+
     // Skip self-chat
     const instancePhone = (instance.phone_number || '').replace(/:.*$/, '');
     if (instancePhone && phone === instancePhone) return;
@@ -82,7 +105,12 @@ export class WebhookService {
       where: { organization_id: organizationId, phone_number: phone },
     });
 
-    const contactName = data.contact_name || data.push_name || data.sender_name || data.notify || '';
+    // For INCOMING: push_name/sender_name/notify = the contact who sent the message → safe to use as contact name
+    // For OUTGOING: push_name/sender_name/notify = OUR OWN name (the WA account owner) → NEVER use for contact name
+    // contact_name = from WA address book, always refers to the conversation partner → safe for both directions
+    const contactName = defaultDirection === 'INCOMING'
+      ? (data.contact_name || data.push_name || data.sender_name || data.notify || '')
+      : (data.contact_name || '');
 
     if (!contact) {
       contact = await prisma.contact.create({
@@ -108,20 +136,14 @@ export class WebhookService {
       });
     }
 
-    // Resolve @lid JID to phone-based JID to prevent split conversations.
-    // WA sends incoming messages with @lid format, but CRM outgoing uses phone@s.whatsapp.net.
-    // IMPORTANT: Only resolve if phone came from data.phone_number (real phone number),
-    // NOT from JID fallback (which would be the LID number itself, not a real phone).
-    const hasRealPhone = !!data.phone_number && /^\d+$/.test(data.phone_number);
-    const resolvedJid = (chatJid.endsWith('@lid') && hasRealPhone)
-      ? `${data.phone_number}@s.whatsapp.net`
-      : chatJid;
+    // Always store conversation under phone-based JID to prevent split conversations
+    const conversationJid = `${phone}@s.whatsapp.net`;
 
     // Find or create conversation
     const conversation = await conversationService.findOrCreate(
       organizationId,
       instance.id,
-      resolvedJid,
+      conversationJid,
       contact.id
     );
 
@@ -238,6 +260,65 @@ export class WebhookService {
     }
 
     return message;
+  }
+
+  /**
+   * Handle lid.mapping.resolved webhook event.
+   * When WA API resolves a LID → phone number, update any CRM contacts
+   * that were stored with the LID and merge conversations.
+   */
+  async handleLidMappingResolved(payload: any) {
+    const { instance_id, data } = payload;
+    if (!data?.lid_jid || !data?.phone_number) return;
+
+    const instances = await prisma.wAInstance.findMany({
+      where: { wa_instance_id: instance_id },
+      include: { organization: { select: { id: true } } },
+    });
+
+    for (const instance of instances) {
+      const organizationId = instance.organization.id;
+      const lidNumber = data.lid_jid.replace(/@lid$/, '');
+      const realPhone = data.phone_number;
+
+      // Find contact with LID as phone_number
+      const lidContact = await prisma.contact.findFirst({
+        where: { organization_id: organizationId, phone_number: lidNumber },
+      });
+
+      if (!lidContact) continue;
+
+      // Check if a contact with the real phone already exists
+      const realContact = await prisma.contact.findFirst({
+        where: { organization_id: organizationId, phone_number: realPhone },
+      });
+
+      if (realContact) {
+        // Merge: move LID contact's conversations to real contact, then delete LID contact
+        await prisma.conversation.updateMany({
+          where: { contact_id: lidContact.id, organization_id: organizationId },
+          data: { contact_id: realContact.id },
+        });
+        await prisma.message.updateMany({
+          where: { organization_id: organizationId, conversation_id: { in: (await prisma.conversation.findMany({ where: { contact_id: realContact.id }, select: { id: true } })).map(c => c.id) } },
+          data: {},
+        });
+        await prisma.contact.delete({ where: { id: lidContact.id } });
+        console.log(`📡 LID resolved: merged ${lidNumber} → ${realPhone} (contact ${realContact.id})`);
+      } else {
+        // Just update the LID contact's phone_number to real phone
+        await prisma.contact.update({
+          where: { id: lidContact.id },
+          data: { phone_number: realPhone },
+        });
+        // Also update conversation JIDs from LID to phone-based
+        await prisma.conversation.updateMany({
+          where: { contact_id: lidContact.id, organization_id: organizationId, chat_jid: `${lidNumber}@lid` },
+          data: { chat_jid: `${realPhone}@s.whatsapp.net` },
+        });
+        console.log(`📡 LID resolved: updated contact ${lidContact.id} phone ${lidNumber} → ${realPhone}`);
+      }
+    }
   }
 
   async handleInstanceStatus(payload: any) {

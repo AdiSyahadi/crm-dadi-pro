@@ -1,8 +1,47 @@
 import { Request, Response, NextFunction } from 'express';
 import axios from 'axios';
 import { prisma } from '../config/database';
+import { WAApiClient, resolveDockerUrl } from '../services/wa-api.client';
 
 export class MediaController {
+  /**
+   * Upload media file — proxies to WA API POST /media/upload.
+   * Accepts multipart/form-data with field "file" (via multer).
+   * Returns the media URL that can be used in send-media / broadcast.
+   */
+  async upload(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const file = (req as any).file as Express.Multer.File | undefined;
+      if (!file) {
+        res.status(400).json({ success: false, message: 'No file uploaded. Use field name "file".' });
+        return;
+      }
+
+      const waClient = await WAApiClient.forOrganization(req.user!.organizationId);
+
+      // Derive media type from mime
+      let mediaType = req.body.type as string | undefined;
+      if (!mediaType) {
+        const mime = file.mimetype;
+        if (mime.startsWith('image/')) mediaType = 'image';
+        else if (mime.startsWith('video/')) mediaType = 'video';
+        else if (mime.startsWith('audio/')) mediaType = 'audio';
+        else mediaType = 'document';
+      }
+
+      const result = await waClient.uploadMedia(file.buffer, file.originalname, file.mimetype, mediaType);
+
+      res.json({ success: true, data: result });
+    } catch (error: any) {
+      if (error.response?.data) {
+        const status = error.response.status || 500;
+        res.status(status).json({ success: false, message: error.response.data?.error || error.response.data?.message || 'Upload failed' });
+        return;
+      }
+      next(error);
+    }
+  }
+
   /**
    * Proxy media files from WA API to frontend.
    * 
@@ -33,6 +72,17 @@ export class MediaController {
         return;
       }
 
+      // Resolve relative paths (e.g. /media/org-uuid/file.webp) to full URL using WA API origin
+      let resolvedUrl = url;
+      if (url.startsWith('/')) {
+        try {
+          resolvedUrl = new URL(url, org.wa_api_base_url).href;
+        } catch {
+          res.status(400).json({ success: false, message: 'Invalid relative URL' });
+          return;
+        }
+      }
+
       // SSRF protection: only allow URLs from WA API origin
       let allowedOrigin: string;
       try {
@@ -42,13 +92,23 @@ export class MediaController {
         return;
       }
 
-      if (!url.startsWith(allowedOrigin)) {
+      // Compare origins (resolve Docker URLs for both sides)
+      let requestOrigin: string;
+      try {
+        requestOrigin = new URL(resolvedUrl).origin;
+      } catch {
+        res.status(400).json({ success: false, message: 'Invalid URL' });
+        return;
+      }
+
+      if (requestOrigin !== allowedOrigin && resolveDockerUrl(requestOrigin) !== resolveDockerUrl(allowedOrigin)) {
         res.status(403).json({ success: false, message: 'URL not allowed — must be from WA API' });
         return;
       }
 
-      // Fetch from WA API with auth header
-      const response = await axios.get(url, {
+      // Fetch from WA API with auth header (resolve Docker URL for container networking)
+      const fetchUrl = resolveDockerUrl(resolvedUrl);
+      const response = await axios.get(fetchUrl, {
         headers: { 'X-API-Key': org.wa_api_key },
         responseType: 'stream',
         timeout: 30000,
@@ -64,6 +124,8 @@ export class MediaController {
 
       // Cache in browser for 1 hour (private = only user's browser, not CDN)
       res.set('Cache-Control', 'private, max-age=3600');
+      // Override helmet's CORP header so cross-origin <img>/<video>/<audio> can load
+      res.set('Cross-Origin-Resource-Policy', 'cross-origin');
 
       // Stream binary data to client
       response.data.pipe(res);
@@ -113,6 +175,17 @@ export class MediaController {
         return;
       }
 
+      // Resolve relative paths (e.g. /media/org-uuid/file.webp) to full URL using WA API origin
+      let resolvedUrl = url;
+      if (url.startsWith('/')) {
+        try {
+          resolvedUrl = new URL(url, org.wa_api_base_url).href;
+        } catch {
+          res.status(400).json({ success: false, message: 'Invalid relative URL' });
+          return;
+        }
+      }
+
       // SSRF protection: only allow URLs from WA API origin
       let allowedOrigin: string;
       try {
@@ -122,13 +195,23 @@ export class MediaController {
         return;
       }
 
-      if (!url.startsWith(allowedOrigin)) {
+      // Compare origins (resolve Docker URLs for both sides)
+      let requestOrigin: string;
+      try {
+        requestOrigin = new URL(resolvedUrl).origin;
+      } catch {
+        res.status(400).json({ success: false, message: 'Invalid URL' });
+        return;
+      }
+
+      if (requestOrigin !== allowedOrigin && resolveDockerUrl(requestOrigin) !== resolveDockerUrl(allowedOrigin)) {
         res.status(403).json({ success: false, message: 'URL not allowed' });
         return;
       }
 
-      // Fetch from WA API with auth header
-      const response = await axios.get(url, {
+      // Fetch from WA API with auth header (resolve Docker URL for container networking)
+      const fetchUrl = resolveDockerUrl(resolvedUrl);
+      const response = await axios.get(fetchUrl, {
         headers: { 'X-API-Key': org.wa_api_key },
         responseType: 'stream',
         timeout: 30000,
@@ -143,6 +226,8 @@ export class MediaController {
 
       // Cache in browser for 24 hours
       res.set('Cache-Control', 'public, max-age=86400');
+      // Override helmet's CORP header so cross-origin <img>/<video>/<audio> can load
+      res.set('Cross-Origin-Resource-Policy', 'cross-origin');
 
       response.data.pipe(res);
     } catch (error: any) {

@@ -4,6 +4,7 @@ import { sendSuccess } from '../utils/api-response';
 import { AppError } from '../utils/app-error';
 import { z } from 'zod';
 import axios from 'axios';
+import { resolveDockerUrl } from '../services/wa-api.client';
 
 const waApiConfigSchema = z.object({
   wa_api_base_url: z.string().url().min(1),
@@ -95,7 +96,7 @@ export class SettingsController {
       }
 
       try {
-        const response = await axios.get(`${org.wa_api_base_url}/instances`, {
+        const response = await axios.get(`${resolveDockerUrl(org.wa_api_base_url)}/instances`, {
           headers: {
             'X-API-Key': org.wa_api_key,
             'Content-Type': 'application/json',

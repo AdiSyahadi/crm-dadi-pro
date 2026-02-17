@@ -24,6 +24,11 @@ import {
   MessageSquare,
   User,
   ArrowLeft,
+  X,
+  FileText,
+  Film,
+  Music,
+  Loader2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
@@ -60,6 +65,10 @@ export default function ChatPage() {
   const [messageText, setMessageText] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [mobileShowChat, setMobileShowChat] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [attachedFile, setAttachedFile] = useState<File | null>(null);
+  const [attachedPreview, setAttachedPreview] = useState<string | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
 
   // Fetch conversations
   const { data: conversations = [], isLoading: loadingConversations, error: convError } = useQuery({
@@ -92,14 +101,15 @@ export default function ChatPage() {
 
   // Send message mutation
   const sendMutation = useMutation({
-    mutationFn: async (text: string) => {
-      const { data } = await api.post(`/conversations/${selectedId}/messages`, { content: text, message_type: 'TEXT' });
+    mutationFn: async (payload: { content?: string; media_url?: string; media_type?: string; caption?: string }) => {
+      const { data } = await api.post(`/conversations/${selectedId}/messages`, payload);
       return data;
     },
     onSuccess: (resp) => {
       queryClient.invalidateQueries({ queryKey: ['messages', selectedId] });
       queryClient.invalidateQueries({ queryKey: ['conversations'] });
       setMessageText('');
+      clearAttachment();
       if (resp?.data?.status === 'FAILED') {
         toast.error(resp?.data?.error_message || 'Gagal mengirim pesan ke WhatsApp');
       }
@@ -108,6 +118,39 @@ export default function ChatPage() {
       toast.error(err?.response?.data?.message || 'Gagal mengirim pesan');
     },
   });
+
+  const getMediaTypeFromFile = (file: File): string => {
+    if (file.type.startsWith('image/')) return 'image';
+    if (file.type.startsWith('video/')) return 'video';
+    if (file.type.startsWith('audio/')) return 'audio';
+    return 'document';
+  };
+
+  const clearAttachment = () => {
+    setAttachedFile(null);
+    if (attachedPreview) URL.revokeObjectURL(attachedPreview);
+    setAttachedPreview(null);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    // Size validation
+    const maxSize = file.type.startsWith('video/') ? 64 * 1024 * 1024
+      : file.type.startsWith('image/') || file.type.startsWith('audio/') ? 16 * 1024 * 1024
+      : 100 * 1024 * 1024;
+    if (file.size > maxSize) {
+      toast.error(`File terlalu besar. Maksimal ${Math.round(maxSize / 1024 / 1024)}MB.`);
+      return;
+    }
+    setAttachedFile(file);
+    if (file.type.startsWith('image/') || file.type.startsWith('video/')) {
+      setAttachedPreview(URL.createObjectURL(file));
+    } else {
+      setAttachedPreview(null);
+    }
+  };
 
   // Track selectedId in a ref so socket handlers always see latest value
   const selectedIdRef = useRef(selectedId);
@@ -172,10 +215,36 @@ export default function ChatPage() {
     }, 100);
   }, [messages]);
 
-  const handleSend = useCallback(() => {
-    if (!messageText.trim() || !selectedId) return;
-    sendMutation.mutate(messageText.trim());
-  }, [messageText, selectedId, sendMutation]);
+  const handleSend = useCallback(async () => {
+    if (!selectedId) return;
+    if (!messageText.trim() && !attachedFile) return;
+
+    if (attachedFile) {
+      setIsUploading(true);
+      try {
+        const formData = new FormData();
+        formData.append('file', attachedFile);
+        const mediaType = getMediaTypeFromFile(attachedFile);
+        formData.append('type', mediaType);
+        const { data: uploadResp } = await api.post('/media/upload', formData, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        });
+        const mediaUrl = uploadResp.data?.url;
+        if (!mediaUrl) throw new Error('Upload gagal: URL tidak ditemukan');
+        sendMutation.mutate({
+          media_url: mediaUrl,
+          media_type: mediaType,
+          caption: messageText.trim() || undefined,
+        });
+      } catch (err: any) {
+        toast.error(err?.response?.data?.message || err.message || 'Gagal upload file');
+      } finally {
+        setIsUploading(false);
+      }
+    } else {
+      sendMutation.mutate({ content: messageText.trim() });
+    }
+  }, [messageText, selectedId, sendMutation, attachedFile]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -193,11 +262,19 @@ export default function ChatPage() {
     }
   };
 
-  // WA API /media/ endpoint is public (no auth needed).
-  // Rewrite old /uploads/ URLs to /media/ for backward compat.
+  // Media URLs in DB point to WA API (e.g. http://localhost:3001/media/...).
+  // Browser <img>/<video>/<audio> tags cannot send X-API-Key header,
+  // so we proxy through CRM backend public endpoint /media/wa-proxy?url=...
   const getMediaUrl = (url: string | null): string => {
     if (!url) return '';
-    return url.replace('/uploads/', '/media/');
+    // Normalize old /uploads/ paths to /media/
+    const normalized = url.replace('/uploads/', '/media/');
+    // If it's a full URL (http/https), proxy through CRM backend
+    if (normalized.startsWith('http://') || normalized.startsWith('https://')) {
+      return `${API_BASE_URL}/media/wa-proxy?url=${encodeURIComponent(normalized)}`;
+    }
+    // Relative path — also proxy (prepend WA API base if needed)
+    return `${API_BASE_URL}/media/wa-proxy?url=${encodeURIComponent(normalized)}`;
   };
 
   const isLidNumber = (phone: string) => /^\d{10,}$/.test(phone) && !phone.startsWith('62') && !phone.startsWith('1');
@@ -415,8 +492,36 @@ export default function ChatPage() {
 
             {/* Message Input */}
             <div className="border-t p-3">
+              {/* Attachment Preview */}
+              {attachedFile && (
+                <div className="flex items-center gap-3 px-3 py-2 mb-2 bg-muted/50 rounded-lg max-w-3xl mx-auto">
+                  {attachedPreview && attachedFile.type.startsWith('image/') ? (
+                    <img src={attachedPreview} alt="" className="h-12 w-12 rounded object-cover" />
+                  ) : attachedFile.type.startsWith('video/') ? (
+                    <div className="h-12 w-12 rounded bg-muted flex items-center justify-center"><Film className="h-5 w-5 text-muted-foreground" /></div>
+                  ) : attachedFile.type.startsWith('audio/') ? (
+                    <div className="h-12 w-12 rounded bg-muted flex items-center justify-center"><Music className="h-5 w-5 text-muted-foreground" /></div>
+                  ) : (
+                    <div className="h-12 w-12 rounded bg-muted flex items-center justify-center"><FileText className="h-5 w-5 text-muted-foreground" /></div>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">{attachedFile.name}</p>
+                    <p className="text-xs text-muted-foreground">{(attachedFile.size / 1024).toFixed(0)} KB · {getMediaTypeFromFile(attachedFile)}</p>
+                  </div>
+                  <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={clearAttachment}>
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              )}
+              <input
+                ref={fileInputRef}
+                type="file"
+                className="hidden"
+                accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/mpeg,video/quicktime,video/webm,audio/mpeg,audio/wav,audio/ogg,audio/mp4,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/plain,text/csv"
+                onChange={handleFileSelect}
+              />
               <div className="flex items-center gap-2 max-w-3xl mx-auto">
-                <Button variant="ghost" size="icon" className="h-9 w-9 shrink-0">
+                <Button variant="ghost" size="icon" className="h-9 w-9 shrink-0" onClick={() => fileInputRef.current?.click()} disabled={isUploading}>
                   <Paperclip className="h-4 w-4" />
                 </Button>
                 <div className="flex-1 relative">
@@ -435,9 +540,9 @@ export default function ChatPage() {
                   size="icon"
                   className="h-9 w-9 shrink-0"
                   onClick={handleSend}
-                  disabled={!messageText.trim() || sendMutation.isPending}
+                  disabled={(!messageText.trim() && !attachedFile) || sendMutation.isPending || isUploading}
                 >
-                  <Send className="h-4 w-4" />
+                  {isUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                 </Button>
               </div>
             </div>

@@ -65,6 +65,10 @@ export class WebhookController {
           await webhookService.handleInstanceStatus({ instance_id, data: { ...data, status: event === 'connection.connected' ? 'connected' : (event === 'connection.disconnected' ? 'disconnected' : data?.status) } });
           break;
 
+        case 'lid.mapping.resolved':
+          await webhookService.handleLidMappingResolved({ instance_id, data });
+          break;
+
         default:
           console.log(`Webhook: Unhandled event type: ${event}`);
       }

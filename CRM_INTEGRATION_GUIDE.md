@@ -1,1537 +1,1152 @@
-# 📡 WhatsApp SaaS API - CRM Integration Guide
+# 📋 Panduan Integrasi CRM dengan WAAPI (WhatsApp SaaS API)
 
-## Table of Contents
-- [Overview](#overview)
-- [Authentication](#authentication)
-- [Quick Start](#quick-start)
-- [API Endpoints Reference](#api-endpoints-reference)
-- [Webhooks](#webhooks)
-- [Best Practices](#best-practices)
-- [Code Examples](#code-examples)
-- [Common Integration Patterns](#common-integration-patterns)
-- [Troubleshooting](#troubleshooting)
-- [Security](#security)
+> Dokumen ini menjelaskan cara setup CRM agar bisa mengirim & menerima pesan WhatsApp melalui WAAPI.
 
 ---
 
-## Overview
+## Daftar Isi
 
-### What is this API?
+1. [Arsitektur & Alur Data](#1-arsitektur--alur-data)
+2. [Environment & Network Setup](#2-environment--network-setup)
+3. [Membuat API Key](#3-membuat-api-key)
+4. [Kirim Pesan Teks](#4-kirim-pesan-teks)
+5. [Upload & Kirim Media](#5-upload--kirim-media)
+6. [Menerima Pesan Masuk (Webhook)](#6-menerima-pesan-masuk-webhook)
+7. [Webhook Payload Reference](#7-webhook-payload-reference)
+8. [Manajemen Kontak](#8-manajemen-kontak)
+9. [Cek Status Instance](#9-cek-status-instance)
+10. [Format Nomor Telepon](#10-format-nomor-telepon)
+11. [Rate Limiting](#11-rate-limiting)
+12. [Error Handling](#12-error-handling)
+13. [File Type & Size Limits](#13-file-type--size-limits)
+14. [Security Best Practices](#14-security-best-practices)
+15. [Troubleshooting](#15-troubleshooting)
+16. [Contoh Implementasi Lengkap (Node.js)](#16-contoh-implementasi-lengkap-nodejs)
 
-The WhatsApp SaaS API provides a REST interface to send and receive WhatsApp messages programmatically using the unofficial Baileys library. Built on Fastify with TypeScript, it's designed for CRM, automation tools, and custom integrations.
+---
 
-### Main Use Cases
-
-- **Customer Communication**: Send transactional messages, notifications, and marketing campaigns
-- **Two-Way Chat**: Build chatbots and interactive customer service flows
-- **Broadcast Messaging**: Send bulk messages to multiple contacts with rate limiting
-- **CRM Integration**: Connect with n8n, Make, Zapier, or custom systems
-- **WhatsApp Automation**: Automate replies, contact management, and workflow triggers
-
-### Key Features
-
-✅ Multiple WhatsApp instances per organization  
-✅ Send text, media (image/video/audio/document), and location messages  
-✅ Receive incoming messages via webhooks  
-✅ Contact and tag management  
-✅ Broadcast campaigns with scheduled delivery  
-✅ Webhook auto-reply (respond to incoming messages via webhook response)  
-✅ Rate limiting and anti-ban protection  
-✅ Message warming phases for new accounts  
-✅ API key-based authentication for external integrations  
-
-### Base URL
+## 1. Arsitektur & Alur Data
 
 ```
-Production: https://your-domain.com/api/v1
-Development: http://localhost:3001/api/v1
+┌──────────────┐         ┌──────────────────┐         ┌──────────────┐
+│  CRM-DADI    │ ──API──▶│  WAAPI Backend   │◀──WA──▶ │  WhatsApp    │
+│  (port 5000) │         │  (port 3001)     │         │  Server      │
+│              │◀─Webhook─│                  │         │              │
+└──────────────┘         └──────────────────┘         └──────────────┘
+```
+
+**Alur Kirim Pesan:**
+1. CRM kirim `POST /api/v1/messages/send-text` ke WAAPI (port 3001)
+2. WAAPI kirim ke WhatsApp via Baileys
+3. WAAPI trigger webhook `message.sent` ke CRM
+
+**Alur Terima Pesan:**
+1. Pesan masuk ke WhatsApp
+2. Baileys terima → WAAPI simpan ke DB
+3. WAAPI trigger webhook `message.received` ke CRM (port 5000)
+4. CRM proses pesan masuk (simpan, tampilkan, auto-reply, dll.)
+
+---
+
+## 2. Environment & Network Setup
+
+### Base URL WAAPI
+
+| Konteks | Base URL |
+|---------|----------|
+| CRM & WAAPI di **mesin yang sama** (Docker) | `http://host.docker.internal:3001/api/v1` |
+| CRM & WAAPI di **mesin yang sama** (non-Docker) | `http://localhost:3001/api/v1` |
+| CRM di **server lain** | `http://<IP_WAAPI>:3001/api/v1` |
+
+> **Penting:** Kalau CRM berjalan di dalam Docker container, jangan pakai `localhost`!  
+> Gunakan `host.docker.internal` agar bisa akses service di host machine.
+
+### CORS (Sudah Dikonfigurasi)
+
+WAAPI sudah mengizinkan `http://localhost:3002` (CRM frontend) di CORS.  
+Kalau CRM frontend di port/domain lain, tambahkan di `.env` WAAPI:
+
+```env
+CORS_ORIGIN=http://localhost:3000,http://localhost:3002,http://your-crm-domain.com
+```
+
+> **Catatan:** Request dari server (backend-to-backend, curl, Postman) **tidak terkena CORS**.  
+> CORS hanya berlaku untuk browser (frontend JavaScript).
+
+---
+
+## 3. Membuat API Key
+
+### Langkah-langkah:
+
+1. **Login ke Dashboard WAAPI** → `http://localhost:3000`
+2. **Buka menu API Keys** di sidebar
+3. **Klik "Create API Key"**
+4. **Isi form:**
+   - **Name:** `CRM-DADI Integration`
+   - **Permissions:** pilih yang dibutuhkan (lihat tabel di bawah)
+   - **Rate Limit:** `1000` (request per menit, default)
+5. **Salin API Key** — key hanya ditampilkan **1x saja**, simpan dengan aman!
+
+### Permissions yang Direkomendasikan untuk CRM:
+
+| Permission | Fungsi |
+|-----------|--------|
+| `message:send` | Kirim pesan teks & media |
+| `message:read` | Baca riwayat pesan |
+| `contact:read` | Lihat daftar kontak |
+| `contact:write` | Buat/update kontak |
+| `webhook:read` | Lihat status webhook |
+| `webhook:write` | Configure webhook URL |
+| `instance:read` | Lihat status WhatsApp instance |
+
+Atau gunakan `full_access` untuk memberikan semua permission sekaligus.
+
+### Cara Pakai API Key:
+
+Tambahkan header di setiap HTTP request:
+
+```
+X-API-Key: waapi_xxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ```
 
 ---
 
-## Authentication
+## 4. Kirim Pesan Teks
 
-### Authentication Methods
+### Endpoint
 
-The API supports two authentication methods:
+```
+POST http://localhost:3001/api/v1/messages/send-text
+```
 
-1. **JWT Bearer Token** (for frontend/dashboard)
-2. **API Key** (for external integrations - **RECOMMENDED**)
+### Header
 
-### Getting an API Key
-
-#### Step 1: Create an API Key via Dashboard
-
-```bash
-POST /api/api-keys
-Authorization: Bearer <your_jwt_token>
+```
+X-API-Key: waapi_xxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 Content-Type: application/json
+```
 
+### Body
+
+```json
 {
-  "name": "My CRM Integration",
-  "permissions": [
-    "message:send",
-    "message:read",
-    "contact:read",
-    "contact:write",
-    "instance:read"
-  ],
-  "rate_limit": 1000,
-  "expires_at": "2027-12-31T23:59:59Z"
+  "instance_id": "162a8a8f-828c-4d39-b559-90aed2fd5176",
+  "to": "6281234567890",
+  "message": "Halo, ini pesan dari CRM!"
 }
 ```
 
-**Response:**
+> **`to`** = nomor telepon format internasional **tanpa `+`** (contoh: `6281234567890`)  
+> **`instance_id`** = ID WhatsApp instance yang sudah connected (lihat di Dashboard)
+
+### Response (Sukses)
 
 ```json
 {
   "success": true,
   "data": {
-    "id": "apikey-uuid-here",
-    "name": "My CRM Integration",
-    "key_prefix": "wa_5f8a2",
-    "api_key": "wa_5f8a2b3c4d5e6f7g8h9i0j1k2l3m4n5o6p7q8r9s0t1u2v3w4x5y6z",
-    "permissions": ["message:send", "message:read", ...],
-    "rate_limit": 1000,
-    "is_active": true,
-    "created_at": "2026-02-09T10:00:00Z"
-  },
-  "message": "API key created successfully. Please save the api_key value - it will only be shown once!"
-}
-```
-
-⚠️ **IMPORTANT**: The full `api_key` value is only shown once. Store it securely!
-
-#### Step 2: Use the API Key
-
-Add the API key to the `X-API-Key` header in all requests:
-
-```bash
-curl -H "X-API-Key: wa_5f8a2b3c4d5e6f..." \
-     https://your-domain.com/api/v1/health
-```
-
-### Available Permissions
-
-| Permission | Description |
-|-----------|-------------|
-| `instance:read` | View WhatsApp instances |
-| `instance:write` | Create/update instances |
-| `instance:delete` | Delete instances |
-| `message:send` | Send messages |
-| `message:read` | Read message history |
-| `contact:read` | View contacts |
-| `contact:write` | Create/update contacts |
-| `contact:delete` | Delete contacts |
-| `broadcast:read` | View broadcasts |
-| `broadcast:write` | Create/send broadcasts |
-| `broadcast:delete` | Delete broadcasts |
-| `webhook:read` | View webhook config |
-| `webhook:write` | Configure webhooks |
-| `full_access` | All permissions |
-
-### Rate Limiting
-
-Each API key has a configurable rate limit (10-10,000 requests/hour). The default is 1,000 requests/hour.
-
-Rate limit headers are returned in responses:
-
-```
-X-RateLimit-Limit: 1000
-X-RateLimit-Remaining: 995
-X-RateLimit-Reset: 1675234567
-```
-
----
-
-## Quick Start
-
-### 1. Get Your WhatsApp Instance ID
-
-List your instances to get the `instance_id`:
-
-```bash
-curl -X GET "https://your-domain.com/api/v1/instances" \
-  -H "X-API-Key: wa_your_api_key_here"
-```
-
-**Response:**
-
-```json
-{
-  "success": true,
-  "data": [
-    {
-      "id": "550e8400-e29b-41d4-a716-446655440000",
-      "name": "My WhatsApp",
-      "phone_number": "628123456789",
-      "status": "CONNECTED",
-      "is_active": true,
-      "created_at": "2026-02-01T10:00:00Z"
-    }
-  ]
-}
-```
-
-### 2. Check Instance Status
-
-```bash
-curl -X GET "https://your-domain.com/api/v1/instances/{instance_id}/status" \
-  -H "X-API-Key: wa_your_api_key_here"
-```
-
-**Response:**
-
-```json
-{
-  "success": true,
-  "data": {
-    "status": "CONNECTED",
-    "phone_number": "628123456789",
-    "is_online": true,
-    "connected_at": "2026-02-09T08:00:00Z"
+    "message_id": "uuid-xxx",
+    "wa_message_id": "3EB0xxxxx",
+    "status": "sent"
   }
 }
 ```
 
-### 3. Send Your First Message
+### Contoh cURL
 
 ```bash
-curl -X POST "https://your-domain.com/api/v1/messages/send-text" \
-  -H "X-API-Key: wa_your_api_key_here" \
+curl -X POST http://localhost:3001/api/v1/messages/send-text \
+  -H "X-API-Key: waapi_xxxxxxxxxxxxxxxxxxxxxxxxxxxxx" \
   -H "Content-Type: application/json" \
   -d '{
-    "instance_id": "550e8400-e29b-41d4-a716-446655440000",
-    "to": "628987654321",
-    "message": "Hello from WhatsApp API!"
+    "instance_id": "162a8a8f-828c-4d39-b559-90aed2fd5176",
+    "to": "6281234567890",
+    "message": "Halo dari CRM!"
   }'
 ```
 
-**Response:**
-
-```json
-{
-  "success": true,
-  "data": {
-    "message_id": "msg_abc123",
-    "wa_message_id": "3EB0XXXXXXXXXXXXX",
-    "status": "SENT",
-    "timestamp": "2026-02-09T10:30:00Z"
-  }
-}
-```
-
-✅ **Done!** You've sent your first WhatsApp message via the API.
-
----
-
-## API Endpoints Reference
-
-### Instance Management
-
-#### List Instances
-
-```http
-GET /api/v1/instances
-```
-
-**Query Parameters:**
-- None required
-
-**Response:**
-
-```json
-{
-  "success": true,
-  "data": [
-    {
-      "id": "550e8400-e29b-41d4-a716-446655440000",
-      "name": "Customer Service",
-      "phone_number": "628123456789",
-      "status": "CONNECTED",
-      "is_active": true,
-      "health_score": 95,
-      "daily_message_count": 45,
-      "daily_limit": 500,
-      "warming_phase": "STABLE",
-      "created_at": "2026-02-01T10:00:00Z"
-    }
-  ]
-}
-```
-
-#### Get Instance Status
-
-```http
-GET /api/v1/instances/:instanceId/status
-```
-
-**Response:**
-
-```json
-{
-  "success": true,
-  "data": {
-    "status": "CONNECTED",
-    "phone_number": "628123456789",
-    "is_online": true,
-    "qr_code": null,
-    "connected_at": "2026-02-09T08:00:00Z",
-    "last_seen": "2026-02-09T10:29:00Z"
-  }
-}
-```
-
----
-
-### Messaging Endpoints
-
-#### Send Text Message
-
-```http
-POST /api/v1/messages/send-text
-```
-
-**Permission:** `message:send`
-
-**Request Body:**
-
-```json
-{
-  "instance_id": "550e8400-e29b-41d4-a716-446655440000",
-  "to": "628987654321",
-  "message": "Hello! Your order #12345 has been shipped."
-}
-```
-
-**Phone Number Format:**
-- Use international format without `+` or `-`
-- Indonesia: `628123456789` (not `+62-812-3456-789`)
-- US: `14155552671` (not `+1-415-555-2671`)
-
-**Response:**
-
-```json
-{
-  "success": true,
-  "data": {
-    "message_id": "msg_abc123",
-    "wa_message_id": "3EB0XXXXXXXXXXXXX",
-    "status": "SENT",
-    "timestamp": "2026-02-09T10:30:00Z"
-  }
-}
-```
-
-#### Send Media Message
-
-```http
-POST /api/v1/messages/send-media
-```
-
-**Permission:** `message:send`
-
-**Request Body:**
-
-```json
-{
-  "instance_id": "550e8400-e29b-41d4-a716-446655440000",
-  "to": "628987654321",
-  "media_url": "https://example.com/images/product.jpg",
-  "media_type": "image",
-  "caption": "Check out our new product!"
-}
-```
-
-**Media Types:**
-- `image` - JPG, PNG (max 5MB, recommended < 1MB)
-- `video` - MP4 (max 16MB, recommended < 5MB)
-- `audio` - MP3, OGG (max 16MB)
-- `document` - PDF, DOCX, etc. (max 100MB)
-
-**For Documents:**
-
-```json
-{
-  "instance_id": "550e8400-e29b-41d4-a716-446655440000",
-  "to": "628987654321",
-  "media_url": "https://example.com/invoice-12345.pdf",
-  "media_type": "document",
-  "filename": "Invoice_12345.pdf",
-  "caption": "Your invoice is attached"
-}
-```
-
-**Response:**
-
-```json
-{
-  "success": true,
-  "data": {
-    "message_id": "msg_def456",
-    "wa_message_id": "3EB0YYYYYYYYYY",
-    "status": "SENT",
-    "media_type": "image",
-    "timestamp": "2026-02-09T10:31:00Z"
-  }
-}
-```
-
-#### Send Location
-
-```http
-POST /api/v1/messages/send-location
-```
-
-**Permission:** `message:send`
-
-**Request Body:**
-
-```json
-{
-  "instance_id": "550e8400-e29b-41d4-a716-446655440000",
-  "to": "628987654321",
-  "latitude": -6.200000,
-  "longitude": 106.816666,
-  "name": "Our Store",
-  "address": "Jl. Sudirman No. 123, Jakarta"
-}
-```
-
-**Response:**
-
-```json
-{
-  "success": true,
-  "data": {
-    "message_id": "msg_ghi789",
-    "wa_message_id": "3EB0ZZZZZZZZZ",
-    "status": "SENT",
-    "timestamp": "2026-02-09T10:32:00Z"
-  }
-}
-```
-
-#### Get Message History
-
-```http
-GET /api/v1/messages
-```
-
-**Permission:** `message:read`
-
-**Query Parameters:**
-- `instance_id` (optional) - Filter by instance
-- `direction` (optional) - `INCOMING` or `OUTGOING`
-- `page` (default: 1)
-- `limit` (default: 20, max: 100)
-
-**Example:**
-
-```bash
-curl "https://your-domain.com/api/v1/messages?instance_id=550e8400-e29b-41d4-a716-446655440000&direction=INCOMING&limit=50" \
-  -H "X-API-Key: wa_your_api_key_here"
-```
-
-**Response:**
-
-```json
-{
-  "success": true,
-  "data": [
-    {
-      "id": "msg_123",
-      "instance_id": "550e8400-e29b-41d4-a716-446655440000",
-      "direction": "INCOMING",
-      "chat_jid": "628987654321@s.whatsapp.net",
-      "sender_jid": "628987654321@s.whatsapp.net",
-      "message_type": "text",
-      "content": "Hello, I need help",
-      "status": "RECEIVED",
-      "timestamp": "2026-02-09T10:25:00Z",
-      "wa_message_id": "3EB0AAAAAAAAA"
-    }
-  ],
-  "pagination": {
-    "total": 150,
-    "page": 1,
-    "limit": 50,
-    "total_pages": 3
-  }
-}
-```
-
----
-
-### Contact Management
-
-#### List Contacts
-
-```http
-GET /api/v1/contacts
-```
-
-**Permission:** `contact:read`
-
-**Query Parameters:**
-- `instance_id` (optional) - Filter by instance
-- `search` (optional) - Search by name or phone
-- `page` (default: 1)
-- `limit` (default: 20)
-
-**Response:**
-
-```json
-{
-  "success": true,
-  "data": [
-    {
-      "id": "contact_abc",
-      "instance_id": "550e8400-e29b-41d4-a716-446655440000",
-      "phone_number": "628987654321",
-      "name": "John Doe",
-      "notes": "VIP customer",
-      "tags": ["customer", "vip"],
-      "last_message_at": "2026-02-09T10:25:00Z",
-      "created_at": "2026-02-01T12:00:00Z"
-    }
-  ],
-  "pagination": {
-    "total": 250,
-    "page": 1,
-    "limit": 20,
-    "total_pages": 13
-  }
-}
-```
-
-#### Create Contact
-
-```http
-POST /api/v1/contacts
-```
-
-**Permission:** `contact:write`
-
-**Request Body:**
-
-```json
-{
-  "instance_id": "550e8400-e29b-41d4-a716-446655440000",
-  "phone_number": "628987654321",
-  "name": "Jane Smith",
-  "notes": "Contacted via website form",
-  "tags": ["lead", "website"]
-}
-```
-
-**Response:**
-
-```json
-{
-  "success": true,
-  "data": {
-    "id": "contact_xyz",
-    "instance_id": "550e8400-e29b-41d4-a716-446655440000",
-    "phone_number": "628987654321",
-    "name": "Jane Smith",
-    "notes": "Contacted via website form",
-    "tags": ["lead", "website"],
-    "created_at": "2026-02-09T10:35:00Z"
-  }
-}
-```
-
----
-
-### Health Check
-
-#### Verify API Key
-
-```http
-GET /api/v1/health
-```
-
-**Response:**
-
-```json
-{
-  "success": true,
-  "data": {
-    "status": "ok",
-    "api_key_id": "apikey_123",
-    "organization_id": "org_456",
-    "permissions": ["message:send", "message:read", "contact:read"],
-    "rate_limit": 1000,
-    "timestamp": "2026-02-09T10:36:00Z"
-  }
-}
-```
-
----
-
-## Webhooks
-
-### What are Webhooks?
-
-Webhooks allow you to receive real-time notifications when events occur (incoming messages, connection status changes, etc.). Your server receives HTTP POST requests with event data.
-
-### Supported Event Types
-
-| Event | Description |
-|-------|-------------|
-| `message.received` | New incoming message |
-| `message.sent` | Message sent successfully |
-| `message.delivered` | Message delivered to recipient |
-| `message.read` | Message read by recipient |
-| `message.failed` | Message send failed |
-| `connection.connected` | Instance connected |
-| `connection.disconnected` | Instance disconnected |
-| `connection.qr_update` | QR code updated |
-| `contact.created` | New contact created |
-| `contact.updated` | Contact updated |
-| `broadcast.started` | Broadcast started |
-| `broadcast.completed` | Broadcast completed |
-| `broadcast.failed` | Broadcast failed |
-
-### Configuring Webhooks
-
-You configure webhooks per WhatsApp instance via the dashboard or API (requires JWT auth, not API key):
-
-```http
-PUT /api/webhooks/config
-Authorization: Bearer <jwt_token>
-```
-
-**Request Body:**
-
-```json
-{
-  "instance_id": "550e8400-e29b-41d4-a716-446655440000",
-  "webhook_url": "https://your-server.com/webhooks/whatsapp",
-  "webhook_events": [
-    "message.received",
-    "message.sent",
-    "connection.connected",
-    "connection.disconnected"
-  ],
-  "webhook_secret": "your_random_secret_string_here"
-}
-```
-
-### Webhook Payload Structure
-
-All webhooks follow this structure:
-
-```json
-{
-  "event": "message.received",
-  "timestamp": "2026-02-09T10:40:00Z",
-  "instance_id": "550e8400-e29b-41d4-a716-446655440000",
-  "organization_id": "org_456",
-  "data": {
-    // Event-specific data
-  }
-}
-```
-
-### Event Payload Examples
-
-#### `message.received` - Incoming Message
-
-```json
-{
-  "event": "message.received",
-  "timestamp": "2026-02-09T10:40:00Z",
-  "instance_id": "550e8400-e29b-41d4-a716-446655440000",
-  "organization_id": "org_456",
-  "data": {
-    "message_id": "msg_incoming_123",
-    "wa_message_id": "3EB0BBBBBBBBBBB",
-    "from": "628987654321@s.whatsapp.net",
-    "chat_jid": "628987654321@s.whatsapp.net",
-    "sender_jid": "628987654321@s.whatsapp.net",
-    "message_type": "text",
-    "content": "I need help with my order",
-    "timestamp": "2026-02-09T10:40:00Z",
-    "status": "RECEIVED"
-  }
-}
-```
-
-#### `message.received` - Image with Caption
-
-```json
-{
-  "event": "message.received",
-  "timestamp": "2026-02-09T10:41:00Z",
-  "instance_id": "550e8400-e29b-41d4-a716-446655440000",
-  "organization_id": "org_456",
-  "data": {
-    "message_id": "msg_incoming_124",
-    "wa_message_id": "3EB0CCCCCCCCCCC",
-    "from": "628987654321@s.whatsapp.net",
-    "chat_jid": "628987654321@s.whatsapp.net",
-    "sender_jid": "628987654321@s.whatsapp.net",
-    "message_type": "image",
-    "content": "Here's a photo of the issue",
-    "media_url": "https://your-domain.com/storage/media/xyz.jpg",
-    "timestamp": "2026-02-09T10:41:00Z",
-    "status": "RECEIVED"
-  }
-}
-```
-
-#### `connection.connected`
-
-```json
-{
-  "event": "connection.connected",
-  "timestamp": "2026-02-09T11:00:00Z",
-  "instance_id": "550e8400-e29b-41d4-a716-446655440000",
-  "organization_id": "org_456",
-  "data": {
-    "status": "CONNECTED",
-    "phone_number": "628123456789"
-  }
-}
-```
-
-#### `connection.disconnected`
-
-```json
-{
-  "event": "connection.disconnected",
-  "timestamp": "2026-02-09T11:30:00Z",
-  "instance_id": "550e8400-e29b-41d4-a716-446655440000",
-  "organization_id": "org_456",
-  "data": {
-    "status": "DISCONNECTED",
-    "reason": "Connection lost"
-  }
-}
-```
-
-### Webhook Auto-Reply Feature
-
-**Powerful feature**: If your webhook endpoint returns a JSON response with a `message` field when receiving `message.received` events, the API will automatically send that as a reply to the sender.
-
-**Example Webhook Response:**
-
-```json
-{
-  "message": "Thank you for contacting us! We'll respond shortly."
-}
-```
-
-**Supported response keys:**
-- `message`
-- `text`
-- `reply`
-- `output`
-
-Or return plain text (non-HTML, non-JSON).
-
-This enables **zero-code auto-responders** using n8n, Make, or Zapier!
-
-### Webhook Delivery & Retries
-
-- **Timeout**: 30 seconds
-- **Retry Policy**: 3 attempts with exponential backoff (1s, 2s, 4s)
-- **Success**: HTTP status 200-299
-- **Failure**: Any other status or timeout
-
-Webhook delivery logs are stored and can be viewed via the dashboard.
-
----
-
-## Best Practices
-
-### 1. Rate Limiting
-
-**Per Instance Limits:**
-
-WhatsApp doesn't publish official rate limits, but based on real-world usage:
-
-- **New accounts (< 7 days)**: 20-50 messages/day
-- **Warming phase (7-30 days)**: 100-300 messages/day
-- **Established accounts (> 30 days)**: 500-1000+ messages/day
-
-**API enforces warming phases:**
-
-| Phase | Days | Daily Limit | Hourly Limit |
-|-------|------|-------------|--------------|
-| `NEW` | 0-7 | 50 | 10 |
-| `WARMING_UP` | 7-14 | 150 | 20 |
-| `GROWING` | 14-30 | 300 | 40 |
-| `STABLE` | 30+ | 1000 | 100 |
-
-**Best Practices:**
-- Start slow with new numbers
-- Gradually increase volume over 30 days
-- Spread messages evenly throughout the day
-- Use delays between messages (3-10 seconds)
-
-### 2. Error Handling
-
-Always check the `success` field and handle errors gracefully:
-
-```python
-response = requests.post(url, json=payload, headers=headers)
-data = response.json()
-
-if data.get('success'):
-    print(f"Message sent: {data['data']['message_id']}")
-else:
-    error = data.get('error', {})
-    print(f"Error {error.get('code')}: {error.get('message')}")
-    
-    # Handle specific errors
-    if error.get('code') == 'MESSAGE_004':
-        # Daily limit reached - wait and retry tomorrow
-        schedule_retry_tomorrow(payload)
-```
-
-**Common Error Codes:**
-
-| Code | Meaning | Action |
-|------|---------|--------|
-| `INSTANCE_003` | Not connected | Check QR code, reconnect |
-| `MESSAGE_002` | Invalid number | Validate phone format |
-| `MESSAGE_004` | Daily limit reached | Queue for tomorrow |
-| `MESSAGE_005` | Rate limit exceeded | Slow down, add delays |
-| `AUTH_002` | Token expired | Refresh API key |
-
-### 3. Anti-Ban Strategies
-
-🚫 **Avoid These:**
-- Sending identical messages to many people (looks like spam)
-- No delays between messages
-- Messaging users who never replied
-- Not warming up new accounts
-- Using URL shorteners
-- Sending promotional content 24/7
-
-✅ **Do These:**
-- Personalize each message (use name, order ID, etc.)
-- Add random delays (3-10 seconds)
-- Only message engaged users
-- Follow warming phase limits
-- Use full URLs or branded links
-- Respect business hours (9am-9pm)
-- Let users opt-out easily
-
-### 4. Message Queuing
-
-For high-volume sending, use a queue system:
-
-```python
-# Pseudocode
-queue = []
-
-# Add messages to queue
-for customer in customers:
-    queue.append({
-        'to': customer.phone,
-        'message': f"Hi {customer.name}, your order {customer.order_id} is ready!"
-    })
-
-# Process queue with delays
-for msg in queue:
-    send_message(msg)
-    time.sleep(random.randint(5, 15))  # Random delay
-    
-    # Check daily limit
-    if messages_sent_today >= daily_limit:
-        save_remaining_to_queue()
-        schedule_resume_tomorrow()
-        break
-```
-
-### 5. Monitoring & Health Checks
-
-Monitor instance health regularly:
-
-```bash
-curl -X GET "https://your-domain.com/api/v1/instances/{instance_id}/status" \
-  -H "X-API-Key: wa_your_key"
-```
-
-Check these metrics:
-- `status`: Should be `CONNECTED`
-- `is_online`: Should be `true`
-- `health_score`: Should be > 80
-- `daily_message_count`: Track usage
-- `last_seen`: Recent activity
-
-Set up alerts if:
-- Instance disconnects
-- Health score drops below 70
-- Messages fail repeatedly
-
----
-
-## Code Examples
-
-### Node.js (JavaScript)
+### Contoh JavaScript (axios)
 
 ```javascript
 const axios = require('axios');
 
-const API_URL = 'https://your-domain.com/api/v1';
-const API_KEY = 'wa_your_api_key_here';
-const INSTANCE_ID = '550e8400-e29b-41d4-a716-446655440000';
+const WAAPI_BASE = 'http://localhost:3001/api/v1';
+const API_KEY = 'waapi_xxxxxxxxxxxxxxxxxxxxxxxxxxxxx';
 
-async function sendMessage(to, message) {
-  try {
-    const response = await axios.post(
-      `${API_URL}/messages/send-text`,
-      {
-        instance_id: INSTANCE_ID,
-        to: to,
-        message: message
-      },
-      {
-        headers: {
-          'X-API-Key': API_KEY,
-          'Content-Type': 'application/json'
-        }
-      }
-    );
-
-    console.log('Message sent:', response.data.data.message_id);
-    return response.data;
-  } catch (error) {
-    console.error('Error:', error.response?.data || error.message);
-    throw error;
-  }
-}
-
-// Usage
-sendMessage('628987654321', 'Hello from Node.js!');
-```
-
-**Send Media:**
-
-```javascript
-async function sendImage(to, imageUrl, caption) {
-  const response = await axios.post(
-    `${API_URL}/messages/send-media`,
-    {
-      instance_id: INSTANCE_ID,
-      to: to,
-      media_url: imageUrl,
-      media_type: 'image',
-      caption: caption
-    },
-    {
-      headers: {
-        'X-API-Key': API_KEY,
-        'Content-Type': 'application/json'
-      }
-    }
-  );
-
+async function sendText(instanceId, to, message) {
+  const response = await axios.post(`${WAAPI_BASE}/messages/send-text`, {
+    instance_id: instanceId,
+    to: to,
+    message: message
+  }, {
+    headers: { 'X-API-Key': API_KEY }
+  });
   return response.data;
 }
 
-sendImage(
-  '628987654321',
-  'https://example.com/product.jpg',
-  'Check out our new product!'
-);
+// Contoh penggunaan
+sendText('162a8a8f-...', '6281234567890', 'Halo!');
 ```
 
-### Python
+---
 
-```python
-import requests
-import time
+## 5. Upload & Kirim Media
 
-API_URL = 'https://your-domain.com/api/v1'
-API_KEY = 'wa_your_api_key_here'
-INSTANCE_ID = '550e8400-e29b-41d4-a716-446655440000'
+### Langkah 1: Upload File
 
-headers = {
-    'X-API-Key': API_KEY,
-    'Content-Type': 'application/json'
-}
-
-def send_message(to, message):
-    """Send a text message"""
-    payload = {
-        'instance_id': INSTANCE_ID,
-        'to': to,
-        'message': message
-    }
-    
-    response = requests.post(
-        f'{API_URL}/messages/send-text',
-        json=payload,
-        headers=headers
-    )
-    
-    data = response.json()
-    
-    if data.get('success'):
-        print(f"✓ Message sent: {data['data']['message_id']}")
-        return data['data']
-    else:
-        error = data.get('error', {})
-        print(f"✗ Error: {error.get('message')}")
-        raise Exception(error.get('message'))
-
-# Send to multiple contacts with delays
-contacts = [
-    {'phone': '628987654321', 'name': 'John'},
-    {'phone': '628123456789', 'name': 'Jane'},
-]
-
-for contact in contacts:
-    message = f"Hi {contact['name']}, this is a personalized message for you!"
-    send_message(contact['phone'], message)
-    time.sleep(5)  # 5 second delay between messages
+```
+POST http://localhost:3001/api/v1/media/upload
 ```
 
-**Send Location:**
-
-```python
-def send_location(to, lat, lng, name, address):
-    """Send a location message"""
-    payload = {
-        'instance_id': INSTANCE_ID,
-        'to': to,
-        'latitude': lat,
-        'longitude': lng,
-        'name': name,
-        'address': address
-    }
-    
-    response = requests.post(
-        f'{API_URL}/messages/send-location',
-        json=payload,
-        headers=headers
-    )
-    
-    return response.json()
-
-send_location(
-    '628987654321',
-    -6.200000,
-    106.816666,
-    'Our Office',
-    'Jl. Sudirman No. 123, Jakarta'
-)
+**Header:**
+```
+X-API-Key: waapi_xxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+Content-Type: multipart/form-data
 ```
 
-### PHP
+**Form Data:**
+| Field | Type | Keterangan |
+|-------|------|------------|
+| `file` | File | File yang akan diupload |
+| `type` | String | `image`, `video`, `audio`, atau `document` (opsional, untuk validasi) |
 
-```php
-<?php
-
-class WhatsAppAPI {
-    private $apiUrl = 'https://your-domain.com/api/v1';
-    private $apiKey = 'wa_your_api_key_here';
-    private $instanceId = '550e8400-e29b-41d4-a716-446655440000';
-    
-    private function request($endpoint, $method = 'GET', $data = null) {
-        $ch = curl_init();
-        
-        $headers = [
-            'X-API-Key: ' . $this->apiKey,
-            'Content-Type: application/json'
-        ];
-        
-        $url = $this->apiUrl . $endpoint;
-        
-        curl_setopt($ch, CURLOPT_URL, $url);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
-        
-        if ($method === 'POST') {
-            curl_setopt($ch, CURLOPT_POST, true);
-            curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
-        }
-        
-        $response = curl_exec($ch);
-        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
-        
-        return json_decode($response, true);
-    }
-    
-    public function sendMessage($to, $message) {
-        $data = [
-            'instance_id' => $this->instanceId,
-            'to' => $to,
-            'message' => $message
-        ];
-        
-        return $this->request('/messages/send-text', 'POST', $data);
-    }
-    
-    public function sendMedia($to, $mediaUrl, $mediaType, $caption = null) {
-        $data = [
-            'instance_id' => $this->instanceId,
-            'to' => $to,
-            'media_url' => $mediaUrl,
-            'media_type' => $mediaType,
-            'caption' => $caption
-        ];
-        
-        return $this->request('/messages/send-media', 'POST', $data);
-    }
-    
-    public function getMessages($page = 1, $limit = 20) {
-        return $this->request(
-            "/messages?instance_id={$this->instanceId}&page={$page}&limit={$limit}"
-        );
-    }
-}
-
-// Usage
-$wa = new WhatsAppAPI();
-
-$result = $wa->sendMessage('628987654321', 'Hello from PHP!');
-
-if ($result['success']) {
-    echo "Message sent: " . $result['data']['message_id'];
-} else {
-    echo "Error: " . $result['error']['message'];
-}
-?>
-```
-
-### cURL
-
-**Send Text Message:**
-
-```bash
-curl -X POST "https://your-domain.com/api/v1/messages/send-text" \
-  -H "X-API-Key: wa_your_api_key_here" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "instance_id": "550e8400-e29b-41d4-a716-446655440000",
-    "to": "628987654321",
-    "message": "Hello from cURL!"
-  }'
-```
-
-**Send Image:**
-
-```bash
-curl -X POST "https://your-domain.com/api/v1/messages/send-media" \
-  -H "X-API-Key: wa_your_api_key_here" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "instance_id": "550e8400-e29b-41d4-a716-446655440000",
-    "to": "628987654321",
-    "media_url": "https://example.com/image.jpg",
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "url": "/media/org-uuid/abcdef12-3456-7890.jpg",
     "media_type": "image",
-    "caption": "Check this out!"
-  }'
+    "mime_type": "image/jpeg",
+    "file_size": 524288,
+    "original_name": "foto-produk.jpg"
+  }
+}
 ```
 
-**Get Message History:**
+### Langkah 2: Kirim Media Message
+
+```
+POST http://localhost:3001/api/v1/messages/send-media
+```
+
+**Body:**
+```json
+{
+  "instance_id": "162a8a8f-828c-4d39-b559-90aed2fd5176",
+  "to": "6281234567890",
+  "media_url": "/media/org-uuid/abcdef12-3456-7890.jpg",
+  "media_type": "image",
+  "caption": "Ini foto produk terbaru kami"
+}
+```
+
+> **`media_url`:** Bisa relative path dari upload (rekomendasi), atau URL publik (https://example.com/image.jpg)  
+> **`media_type`:** Wajib — `image`, `video`, `audio`, atau `document`
+
+### Kirim Dokumen (PDF, Excel, dll.)
+
+```json
+{
+  "instance_id": "162a8a8f-...",
+  "to": "6281234567890",
+  "media_url": "/media/org-uuid/proposal.pdf",
+  "media_type": "document",
+  "caption": "Proposal kerjasama 2026",
+  "filename": "Proposal-Kerjasama.pdf"
+}
+```
+
+> **`filename`:** Nama file yang akan tampil di WhatsApp penerima (khusus document)
+
+### Contoh JavaScript — Upload + Kirim
+
+```javascript
+const axios = require('axios');
+const FormData = require('form-data');
+const fs = require('fs');
+
+const WAAPI_BASE = 'http://localhost:3001/api/v1';
+const API_KEY = 'waapi_xxxxxxxxxxxxxxxxxxxxxxxxxxxxx';
+
+async function sendMedia(instanceId, to, filePath, mediaType, caption) {
+  // Step 1: Upload file
+  const form = new FormData();
+  form.append('file', fs.createReadStream(filePath));
+  form.append('type', mediaType);
+
+  const uploadRes = await axios.post(`${WAAPI_BASE}/media/upload`, form, {
+    headers: {
+      'X-API-Key': API_KEY,
+      ...form.getHeaders()
+    }
+  });
+
+  const mediaUrl = uploadRes.data.data.url;
+
+  // Step 2: Kirim media message
+  const sendRes = await axios.post(`${WAAPI_BASE}/messages/send-media`, {
+    instance_id: instanceId,
+    to: to,
+    media_url: mediaUrl,
+    media_type: mediaType,
+    caption: caption
+  }, {
+    headers: { 'X-API-Key': API_KEY }
+  });
+
+  return sendRes.data;
+}
+
+// Contoh: kirim gambar
+sendMedia('162a8a8f-...', '6281234567890', './foto.jpg', 'image', 'Produk baru!');
+
+// Contoh: kirim dokumen PDF
+sendMedia('162a8a8f-...', '6281234567890', './invoice.pdf', 'document', 'Invoice bulan ini');
+```
+
+---
+
+## 6. Menerima Pesan Masuk (Webhook)
+
+### Apa itu Webhook?
+
+Webhook = WAAPI akan **mem-POST data ke URL CRM kamu** setiap kali ada event (pesan masuk, status berubah, dll.)
+
+### Setup Webhook via API
+
+```
+PUT http://localhost:3001/api/v1/webhook/config
+```
+
+**Header:**
+```
+X-API-Key: waapi_xxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+Content-Type: application/json
+```
+
+**Body:**
+```json
+{
+  "instance_id": "162a8a8f-828c-4d39-b559-90aed2fd5176",
+  "url": "http://host.docker.internal:5000/api/webhook/whatsapp",
+  "events": [
+    "message.received",
+    "message.sent",
+    "message.delivered",
+    "message.read",
+    "connection.connected",
+    "connection.disconnected"
+  ],
+  "secret": "my-webhook-secret-12345"
+}
+```
+
+> **`url`:** URL endpoint di CRM kamu yang akan menerima webhook POST  
+> **`events`:** Event apa saja yang ingin disubscribe  
+> **`secret`:** (opsional) Untuk verifikasi signature — WAAPI akan sign payload dengan HMAC-SHA256
+
+### URL Webhook — Penting!
+
+| Situasi | URL yang Harus Dipakai |
+|---------|------------------------|
+| WAAPI & CRM di Docker **yang sama** | `http://host.docker.internal:5000/api/webhook/whatsapp` |
+| CRM di Docker **network yang sama** | `http://crm-backend:5000/api/webhook/whatsapp` |
+| CRM di **server lain** | `http://<IP_CRM>:5000/api/webhook/whatsapp` |
+
+> **JANGAN** pakai `http://localhost:5000/...` sebagai webhook URL!  
+> Karena dari perspektif container WAAPI, localhost = dirinya sendiri.
+
+### Endpoint Webhook di CRM (yang harus kamu buat)
+
+Kamu harus buat endpoint di CRM backend yang menerima POST request:
+
+```javascript
+// Express.js contoh
+app.post('/api/webhook/whatsapp', (req, res) => {
+  const payload = req.body;
+  
+  console.log('Event:', payload.event);
+  console.log('Instance:', payload.instance_id);
+  console.log('Data:', payload.data);
+  
+  // Proses berdasarkan event type
+  switch (payload.event) {
+    case 'message.received':
+      handleIncomingMessage(payload.data);
+      break;
+    case 'message.sent':
+      updateMessageStatus(payload.data.message_id, 'sent');
+      break;
+    case 'message.delivered':
+      updateMessageStatus(payload.data.message_id, 'delivered');
+      break;
+    case 'message.read':
+      updateMessageStatus(payload.data.message_id, 'read');
+      break;
+    case 'connection.disconnected':
+      alertAdmin('WhatsApp terputus!');
+      break;
+  }
+  
+  // PENTING: Response 200 agar WAAPI tidak retry
+  res.status(200).json({ received: true });
+});
+```
+
+### Verifikasi Signature (Opsional tapi Direkomendasikan)
+
+Jika kamu set `secret` saat configure webhook, WAAPI akan kirim header:
+
+```
+X-Webhook-Signature: <HMAC-SHA256 hex digest>
+```
+
+Cara verifikasi di CRM:
+
+```javascript
+const crypto = require('crypto');
+
+function verifyWebhookSignature(payload, signature, secret) {
+  const expected = crypto
+    .createHmac('sha256', secret)
+    .update(JSON.stringify(payload))
+    .digest('hex');
+  
+  return crypto.timingSafeEqual(
+    Buffer.from(signature, 'hex'),
+    Buffer.from(expected, 'hex')
+  );
+}
+
+// Di middleware
+app.post('/api/webhook/whatsapp', (req, res) => {
+  const signature = req.headers['x-webhook-signature'];
+  
+  if (signature && !verifyWebhookSignature(req.body, signature, 'my-webhook-secret-12345')) {
+    return res.status(401).json({ error: 'Invalid signature' });
+  }
+  
+  // ... proses webhook
+});
+```
+
+---
+
+## 7. Webhook Payload Reference
+
+### Header yang Dikirim WAAPI
+
+```
+Content-Type: application/json
+User-Agent: WhatsApp-SaaS-Webhook/1.0
+X-Webhook-Event: message.received
+X-Webhook-Timestamp: 2026-02-16T10:30:00.000Z
+X-Webhook-Signature: abc123...  (jika secret dikonfigurasi)
+```
+
+### Event Types
+
+| Event | Kapan Trigger |
+|-------|--------------|
+| `message.received` | Pesan masuk dari kontak |
+| `message.sent` | Pesan berhasil terkirim |
+| `message.delivered` | Pesan sampai ke HP penerima (centang 2) |
+| `message.read` | Pesan dibaca penerima (centang biru) |
+| `message.failed` | Pesan gagal terkirim |
+| `connection.connected` | WhatsApp berhasil connect |
+| `connection.disconnected` | WhatsApp terputus |
+| `connection.qr_update` | QR code baru tersedia |
+| `contact.created` | Kontak baru dibuat |
+| `contact.updated` | Kontak diupdate |
+| `broadcast.started` | Broadcast mulai dikirim |
+| `broadcast.completed` | Broadcast selesai |
+| `broadcast.failed` | Broadcast gagal |
+
+### Payload: `message.received` (Pesan Teks Masuk)
+
+```json
+{
+  "event": "message.received",
+  "timestamp": "2026-02-16T10:30:00.000Z",
+  "instance_id": "162a8a8f-828c-4d39-b559-90aed2fd5176",
+  "organization_id": "org-uuid",
+  "data": {
+    "message_id": "msg-uuid",
+    "wa_message_id": "3EB0xxxxxxxxxxxx",
+    "chat_jid": "6281234567890@s.whatsapp.net",
+    "sender_jid": "6281234567890@s.whatsapp.net",
+    "message_type": "text",
+    "content": "Halo, saya mau tanya produk",
+    "status": "received",
+    "timestamp": "2026-02-16T10:30:00.000Z"
+  }
+}
+```
+
+### Payload: `message.received` (Media — Gambar/Video/Audio/Dokumen)
+
+```json
+{
+  "event": "message.received",
+  "timestamp": "2026-02-16T10:31:00.000Z",
+  "instance_id": "162a8a8f-828c-4d39-b559-90aed2fd5176",
+  "organization_id": "org-uuid",
+  "data": {
+    "message_id": "msg-uuid",
+    "wa_message_id": "3EB0xxxxxxxxxxxx",
+    "chat_jid": "6281234567890@s.whatsapp.net",
+    "sender_jid": "6281234567890@s.whatsapp.net",
+    "message_type": "image",
+    "content": "Caption gambar (jika ada)",
+    "media_url": "/uploads/org-uuid/a1b2c3d4-image.jpg",
+    "mime_type": "image/jpeg",
+    "file_size": 524288,
+    "file_name": null,
+    "status": "received",
+    "timestamp": "2026-02-16T10:31:00.000Z"
+  }
+}
+```
+
+**Field media khusus:**
+
+| Field | Tipe | Keterangan |
+|-------|------|------------|
+| `media_url` | string | Path file yang sudah disimpan WAAPI. Akses: `http://localhost:3001{media_url}` |
+| `mime_type` | string | MIME type file (contoh: `image/jpeg`, `application/pdf`) |
+| `file_size` | number | Ukuran file dalam bytes |
+| `file_name` | string \| null | Nama file asli dari pengirim — **hanya ada untuk `document`**, null untuk image/video/audio |
+
+### Cara Download Media dari Webhook
+
+Media yang masuk otomatis disimpan WAAPI. Untuk download:
+
+```javascript
+// media_url dari webhook = "/uploads/org-uuid/a1b2c3d4-image.jpg"
+// Akses langsung tanpa auth:
+const fullUrl = `http://localhost:3001${payload.data.media_url}`;
+
+// Download file
+const response = await axios.get(fullUrl, { responseType: 'arraybuffer' });
+const buffer = response.data;
+```
+
+> **Media URL** bisa diakses langsung **tanpa API Key** — ini URL publik.  
+> Gunakan `mime_type` untuk menentukan bagaimana CRM menampilkan file tersebut.
+
+### Payload: `connection.disconnected`
+
+```json
+{
+  "event": "connection.disconnected",
+  "timestamp": "2026-02-16T11:00:00.000Z",
+  "instance_id": "162a8a8f-828c-4d39-b559-90aed2fd5176",
+  "organization_id": "org-uuid",
+  "data": {
+    "status": "disconnected",
+    "reason": "Connection closed"
+  }
+}
+```
+
+---
+
+## 8. Manajemen Kontak
+
+### List Kontak
+
+```
+GET http://localhost:3001/api/v1/contacts?instance_id=xxx&search=john&page=1&limit=20
+```
+
+### Buat Kontak Baru
+
+```
+POST http://localhost:3001/api/v1/contacts
+```
+
+```json
+{
+  "instance_id": "162a8a8f-...",
+  "phone_number": "6281234567890",
+  "name": "John Doe",
+  "notes": "Lead dari website",
+  "tags": ["lead", "website"]
+}
+```
+
+### Update Kontak
+
+```
+PATCH http://localhost:3001/api/v1/contacts/:id
+```
+
+```json
+{
+  "name": "John Doe (Updated)",
+  "tags": ["customer", "premium"],
+  "custom_fields": {
+    "company": "PT Maju Jaya",
+    "position": "Manager"
+  }
+}
+```
+
+---
+
+## 9. Cek Status Instance
+
+Sebelum kirim pesan, pastikan instance WhatsApp connected:
+
+```
+GET http://localhost:3001/api/v1/instances
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "162a8a8f-828c-4d39-b559-90aed2fd5176",
+      "name": "Test",
+      "phone_number": "628xxxxxxxxxx",
+      "status": "connected",
+      "is_active": true,
+      "daily_message_count": 15,
+      "daily_limit": 999999,
+      "health_score": 95
+    }
+  ]
+}
+```
+
+> Pastikan `status` = `"connected"` dan `is_active` = `true` sebelum kirim pesan.
+
+---
+
+## 10. Format Nomor Telepon
+
+| Format | Contoh | Keterangan |
+|--------|--------|------------|
+| ✅ Internasional (tanpa +) | `6281234567890` | **Gunakan ini!** |
+| ❌ Dengan + | `+6281234567890` | Jangan pakai + |
+| ❌ Format lokal | `081234567890` | Jangan pakai 0 di depan |
+| ❌ Dengan spasi/dash | `0812-3456-7890` | Jangan pakai separator |
+
+### Konversi di CRM
+
+```javascript
+function normalizePhone(phone) {
+  // Hapus semua non-digit
+  let clean = phone.replace(/\D/g, '');
+  
+  // Kalau mulai dari 0, ganti dengan 62 (Indonesia)
+  if (clean.startsWith('0')) {
+    clean = '62' + clean.substring(1);
+  }
+  
+  // Kalau mulai dari 8 (tanpa kode negara), tambah 62
+  if (clean.startsWith('8')) {
+    clean = '62' + clean;
+  }
+  
+  return clean;
+}
+
+// Test
+normalizePhone('+62 812-3456-7890'); // → "6281234567890"
+normalizePhone('081234567890');       // → "6281234567890"
+normalizePhone('6281234567890');      // → "6281234567890"
+```
+
+---
+
+## 11. Rate Limiting
+
+| Limit | Nilai |
+|-------|-------|
+| Per API Key | Default 1000 req/menit (configurable saat create key) |
+| Range | Minimum 10, Maksimum 10.000 req/menit |
+
+Jika rate limit terlampaui, response:
+
+```json
+{
+  "statusCode": 429,
+  "error": "Too Many Requests",
+  "message": "Rate limit exceeded"
+}
+```
+
+**Tips:** Jika CRM mengirim broadcast/bulk message, gunakan fitur Broadcast bawaan WAAPI (endpoint `/broadcasts`) yang sudah menangani delay & anti-ban secara otomatis.
+
+---
+
+## 12. Error Handling
+
+### Response Format Error
+
+```json
+{
+  "success": false,
+  "error": {
+    "code": "ERROR_CODE",
+    "message": "Human-readable error message"
+  }
+}
+```
+
+### Error Codes Umum
+
+| HTTP Status | Code | Penyebab |
+|------------|------|----------|
+| 400 | `VALIDATION_ERROR` | Body request tidak valid (field wajib kosong, format salah) |
+| 401 | `UNAUTHORIZED` | API Key tidak valid atau expired |
+| 403 | `FORBIDDEN` | API Key tidak punya permission untuk endpoint ini |
+| 404 | `NOT_FOUND` | Instance/contact/message tidak ditemukan |
+| 413 | `FILE_TOO_LARGE` | File melebihi batas ukuran |
+| 429 | `TOO_MANY_REQUESTS` | Rate limit terlampaui |
+| 500 | `INTERNAL_ERROR` | Error internal server |
+
+### Best Practice Error Handling di CRM
+
+```javascript
+async function sendMessage(instanceId, to, message) {
+  try {
+    const res = await axios.post(`${WAAPI_BASE}/messages/send-text`, {
+      instance_id: instanceId,
+      to,
+      message
+    }, {
+      headers: { 'X-API-Key': API_KEY }
+    });
+    return { success: true, data: res.data };
+  } catch (error) {
+    const status = error.response?.status;
+    const errData = error.response?.data;
+    
+    switch (status) {
+      case 401:
+        console.error('API Key invalid! Cek kembali key di settings.');
+        break;
+      case 429:
+        console.warn('Rate limit! Tunggu sebentar sebelum kirim lagi.');
+        // Retry setelah 1 menit
+        await new Promise(r => setTimeout(r, 60000));
+        return sendMessage(instanceId, to, message);
+      case 400:
+        console.error('Data tidak valid:', errData?.error?.message);
+        break;
+      default:
+        console.error('Error:', status, errData);
+    }
+    
+    return { success: false, error: errData };
+  }
+}
+```
+
+---
+
+## 13. File Type & Size Limits
+
+### Image
+
+| MIME Type | Max Size |
+|-----------|---------|
+| `image/jpeg` | 16 MB |
+| `image/png` | 16 MB |
+| `image/gif` | 16 MB |
+| `image/webp` | 16 MB |
+
+### Video
+
+| MIME Type | Max Size |
+|-----------|---------|
+| `video/mp4` | 64 MB |
+| `video/mpeg` | 64 MB |
+| `video/quicktime` | 64 MB |
+| `video/webm` | 64 MB |
+
+### Audio
+
+| MIME Type | Max Size |
+|-----------|---------|
+| `audio/mpeg` (.mp3) | 16 MB |
+| `audio/wav` | 16 MB |
+| `audio/ogg` | 16 MB |
+| `audio/mp4` (.m4a) | 16 MB |
+
+### Document
+
+| MIME Type | Max Size |
+|-----------|---------|
+| `application/pdf` | 100 MB |
+| `application/msword` (.doc) | 100 MB |
+| `application/vnd.openxmlformats-officedocument.wordprocessingml.document` (.docx) | 100 MB |
+| `application/vnd.ms-excel` (.xls) | 100 MB |
+| `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` (.xlsx) | 100 MB |
+| `text/plain` (.txt) | 100 MB |
+| `text/csv` (.csv) | 100 MB |
+
+> **Format TIDAK didukung:** ZIP, RAR, HEIC, AVI, FLAC, EXE, dan lainnya yang tidak ada di list di atas.
+
+---
+
+## 14. Security Best Practices
+
+1. **Simpan API Key di environment variable**, jangan hardcode di source code
+2. **Gunakan webhook secret** dan verifikasi signature di endpoint CRM
+3. **Jangan expose API Key di frontend** — semua request WAAPI harus dari backend CRM
+4. **Set permission minimal** — hanya berikan permission yang dibutuhkan CRM
+5. **Set expiry date** pada API Key (opsional) — key otomatis nonaktif setelah expired
+6. **Rotate API Key** secara berkala menggunakan endpoint regenerate
 
 ```bash
-curl -X GET "https://your-domain.com/api/v1/messages?instance_id=550e8400-e29b-41d4-a716-446655440000&limit=50" \
-  -H "X-API-Key: wa_your_api_key_here"
+# Simpan di .env CRM
+WAAPI_BASE_URL=http://host.docker.internal:3001/api/v1
+WAAPI_API_KEY=waapi_xxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+WAAPI_WEBHOOK_SECRET=my-webhook-secret-12345
+WAAPI_INSTANCE_ID=162a8a8f-828c-4d39-b559-90aed2fd5176
 ```
 
 ---
 
-## Common Integration Patterns
+## 15. Troubleshooting
 
-### 1. Two-Way Chat (Send + Receive)
+### ❌ "CORS: origin not allowed"
 
-**Setup Webhook → Process → Reply**
-
-#### Step 1: Configure Webhook
-
-Set your webhook URL to receive messages:
-
+**Penyebab:** Frontend CRM (browser) diblock CORS.  
+**Solusi:** Tambahkan origin CRM frontend di `.env` WAAPI:
+```env
+CORS_ORIGIN=http://localhost:3000,http://localhost:3002
 ```
-https://your-server.com/webhooks/whatsapp
+Lalu restart backend: `docker compose restart backend`
+
+### ❌ "401 Unauthorized"
+
+**Penyebab:** API Key salah, expired, atau tidak aktif.  
+**Solusi:** Cek API Key di Dashboard → API Keys. Regenerate jika perlu.
+
+### ❌ "403 Forbidden" / "Insufficient permissions"
+
+**Penyebab:** API Key tidak punya permission untuk endpoint tersebut.  
+**Solusi:** Update permission API Key di Dashboard. Contoh: `message:send` untuk kirim pesan.
+
+### ❌ "Instance not connected"
+
+**Penyebab:** WhatsApp belum scan QR atau terputus.  
+**Solusi:**
+1. Buka Dashboard → Instances
+2. Klik Connect
+3. Scan QR Code dengan WhatsApp di HP
+
+### ❌ Webhook tidak diterima CRM
+
+**Penyebab yang mungkin:**
+1. URL webhook salah — cek pakai `host.docker.internal` bukan `localhost`
+2. CRM endpoint belum return 200 — WAAPI akan retry sampai 5x
+3. Event tidak di-subscribe — cek events di webhook config
+4. Network issue — cek apakah container bisa saling berkomunikasi
+
+**Debug:**
+```bash
+# Cek webhook history di WAAPI
+curl -H "X-API-Key: waapi_xxx" http://localhost:3001/api/v1/webhook/status
 ```
 
-#### Step 2: Handle Incoming Messages
+### ❌ "FILE_TOO_LARGE" (413)
 
-```python
-from flask import Flask, request, jsonify
+**Penyebab:** File melebihi batas ukuran.  
+**Solusi:** Cek limit di [File Type & Size Limits](#13-file-type--size-limits). Compress file sebelum upload.
 
-app = Flask(__name__)
+### ❌ Media terkirim tapi caption tidak muncul
 
-@app.route('/webhooks/whatsapp', methods=['POST'])
-def webhook_handler():
-    data = request.json
+**Penyebab:** `caption` terkirim untuk `audio` — WhatsApp tidak support caption di audio.  
+**Solusi:** Caption hanya support untuk `image`, `video`, dan `document`.
+
+---
+
+## 16. Contoh Implementasi Lengkap (Node.js)
+
+### waapi-client.js — Module Helper
+
+```javascript
+const axios = require('axios');
+const FormData = require('form-data');
+const fs = require('fs');
+const crypto = require('crypto');
+
+class WaapiClient {
+  constructor(config) {
+    this.baseUrl = config.baseUrl || 'http://host.docker.internal:3001/api/v1';
+    this.apiKey = config.apiKey;
+    this.instanceId = config.instanceId;
+    this.webhookSecret = config.webhookSecret;
     
-    if data['event'] == 'message.received':
-        sender = data['data']['from']
-        message = data['data']['content']
-        
-        print(f"Received from {sender}: {message}")
-        
-        # Simple auto-reply logic
-        if 'help' in message.lower():
-            reply = "How can I help you today?"
-        elif 'price' in message.lower():
-            reply = "Our pricing starts at $99/month"
-        else:
-            reply = "Thanks for your message! Our team will respond soon."
-        
-        # Return reply (auto-reply feature)
-        return jsonify({"message": reply})
-    
-    return jsonify({"status": "ok"})
+    this.http = axios.create({
+      baseURL: this.baseUrl,
+      headers: { 'X-API-Key': this.apiKey },
+      timeout: 30000
+    });
+  }
 
-if __name__ == '__main__':
-    app.run(port=5000)
-```
+  // ─── PESAN ───
 
-Or manually send reply via API:
+  async sendText(to, message) {
+    const { data } = await this.http.post('/messages/send-text', {
+      instance_id: this.instanceId,
+      to,
+      message
+    });
+    return data;
+  }
 
-```python
-def send_reply(to, message):
-    payload = {
-        'instance_id': INSTANCE_ID,
-        'to': to,
-        'message': message
+  async sendImage(to, filePath, caption = '') {
+    const mediaUrl = await this._uploadFile(filePath, 'image');
+    return this._sendMedia(to, mediaUrl, 'image', caption);
+  }
+
+  async sendDocument(to, filePath, caption = '', filename = '') {
+    const mediaUrl = await this._uploadFile(filePath, 'document');
+    return this._sendMedia(to, mediaUrl, 'document', caption, filename);
+  }
+
+  async sendVideo(to, filePath, caption = '') {
+    const mediaUrl = await this._uploadFile(filePath, 'video');
+    return this._sendMedia(to, mediaUrl, 'video', caption);
+  }
+
+  async sendAudio(to, filePath) {
+    const mediaUrl = await this._uploadFile(filePath, 'audio');
+    return this._sendMedia(to, mediaUrl, 'audio');
+  }
+
+  async sendLocation(to, latitude, longitude, name = '', address = '') {
+    const { data } = await this.http.post('/messages/send-location', {
+      instance_id: this.instanceId,
+      to, latitude, longitude, name, address
+    });
+    return data;
+  }
+
+  // ─── KONTAK ───
+
+  async getContacts(search = '', page = 1, limit = 20) {
+    const { data } = await this.http.get('/contacts', {
+      params: { instance_id: this.instanceId, search, page, limit }
+    });
+    return data;
+  }
+
+  async createContact(phoneNumber, name, tags = []) {
+    const { data } = await this.http.post('/contacts', {
+      instance_id: this.instanceId,
+      phone_number: phoneNumber,
+      name,
+      tags
+    });
+    return data;
+  }
+
+  // ─── STATUS ───
+
+  async getInstances() {
+    const { data } = await this.http.get('/instances');
+    return data;
+  }
+
+  async isConnected() {
+    const res = await this.getInstances();
+    const instance = res.data?.find(i => i.id === this.instanceId);
+    return instance?.status === 'connected' && instance?.is_active;
+  }
+
+  // ─── WEBHOOK ───
+
+  async configureWebhook(url, events, secret = '') {
+    const { data } = await this.http.put('/webhook/config', {
+      instance_id: this.instanceId,
+      url,
+      events,
+      secret: secret || undefined
+    });
+    return data;
+  }
+
+  verifyWebhookSignature(payload, signature) {
+    if (!this.webhookSecret) return true; // Skip if no secret
+    const expected = crypto
+      .createHmac('sha256', this.webhookSecret)
+      .update(JSON.stringify(payload))
+      .digest('hex');
+    try {
+      return crypto.timingSafeEqual(
+        Buffer.from(signature || '', 'hex'),
+        Buffer.from(expected, 'hex')
+      );
+    } catch {
+      return false;
     }
-    requests.post(f'{API_URL}/messages/send-text', json=payload, headers=headers)
+  }
 
-@app.route('/webhooks/whatsapp', methods=['POST'])
-def webhook_handler():
-    data = request.json
-    
-    if data['event'] == 'message.received':
-        sender = extract_phone(data['data']['from'])  # Extract from JID
-        message = data['data']['content']
-        
-        # Process and reply
-        reply = process_message(message)
-        send_reply(sender, reply)
-    
-    return jsonify({"status": "ok"})
+  // ─── INTERNAL ───
+
+  async _uploadFile(filePath, type) {
+    const form = new FormData();
+    form.append('file', fs.createReadStream(filePath));
+    form.append('type', type);
+
+    const { data } = await this.http.post('/media/upload', form, {
+      headers: form.getHeaders()
+    });
+    return data.data.url;
+  }
+
+  async _sendMedia(to, mediaUrl, mediaType, caption = '', filename = '') {
+    const body = {
+      instance_id: this.instanceId,
+      to,
+      media_url: mediaUrl,
+      media_type: mediaType
+    };
+    if (caption) body.caption = caption;
+    if (filename) body.filename = filename;
+
+    const { data } = await this.http.post('/messages/send-media', body);
+    return data;
+  }
+}
+
+module.exports = WaapiClient;
 ```
 
-### 2. Broadcast Messages
+### Contoh Penggunaan di CRM
 
-Send personalized messages to a list:
+```javascript
+const WaapiClient = require('./waapi-client');
 
-```python
-import csv
-import time
-import random
+const waapi = new WaapiClient({
+  baseUrl: process.env.WAAPI_BASE_URL,
+  apiKey: process.env.WAAPI_API_KEY,
+  instanceId: process.env.WAAPI_INSTANCE_ID,
+  webhookSecret: process.env.WAAPI_WEBHOOK_SECRET
+});
 
-def send_broadcast_campaign():
-    # Load recipients from CSV
-    with open('customers.csv', 'r') as f:
-        reader = csv.DictReader(f)
-        customers = list(reader)
-    
-    print(f"Sending to {len(customers)} customers...")
-    
-    for i, customer in enumerate(customers, 1):
-        # Personalized message
-        message = f"""
-Hi {customer['name']}! 👋
+// Kirim teks
+await waapi.sendText('6281234567890', 'Halo, terima kasih sudah menghubungi kami!');
 
-We have a special offer just for you:
-🎉 20% OFF on your next purchase!
+// Kirim gambar
+await waapi.sendImage('6281234567890', './promo.jpg', 'Promo spesial bulan ini!');
 
-Use code: {customer['name'].upper()}20
+// Kirim PDF
+await waapi.sendDocument('6281234567890', './invoice.pdf', 'Invoice #INV-001', 'Invoice-Februari.pdf');
 
-Valid until Feb 15, 2026.
-        """.strip()
-        
-        try:
-            result = send_message(customer['phone'], message)
-            print(f"[{i}/{len(customers)}] ✓ Sent to {customer['name']}")
-            
-            # Random delay (5-15 seconds)
-            delay = random.randint(5, 15)
-            time.sleep(delay)
-            
-        except Exception as e:
-            print(f"[{i}/{len(customers)}] ✗ Failed for {customer['name']}: {e}")
-            continue
-
-send_broadcast_campaign()
+// Cek status
+const connected = await waapi.isConnected();
+console.log('WhatsApp connected:', connected);
 ```
 
-### 3. Contact Synchronization
+### Webhook Handler di CRM (Express.js)
 
-Sync contacts from your CRM to WhatsApp API:
+```javascript
+const express = require('express');
+const WaapiClient = require('./waapi-client');
 
-```python
-def sync_contacts_from_crm():
-    """Sync contacts from your CRM to WhatsApp API"""
-    
-    # Get contacts from your CRM
-    crm_contacts = get_contacts_from_crm()  # Your CRM fetch logic
-    
-    for contact in crm_contacts:
-        try:
-            # Create contact in WhatsApp API
-            payload = {
-                'instance_id': INSTANCE_ID,
-                'phone_number': contact['phone'],
-                'name': contact['name'],
-                'notes': f"CRM ID: {contact['id']}, Last purchase: {contact['last_purchase']}",
-                'tags': contact['tags']
-            }
-            
-            response = requests.post(
-                f'{API_URL}/contacts',
-                json=payload,
-                headers=headers
-            )
-            
-            if response.json().get('success'):
-                print(f"✓ Synced: {contact['name']}")
-            else:
-                print(f"✗ Failed: {contact['name']}")
-                
-        except Exception as e:
-            print(f"Error syncing {contact['name']}: {e}")
+const app = express();
+app.use(express.json());
 
-sync_contacts_from_crm()
+const waapi = new WaapiClient({
+  baseUrl: process.env.WAAPI_BASE_URL,
+  apiKey: process.env.WAAPI_API_KEY,
+  instanceId: process.env.WAAPI_INSTANCE_ID,
+  webhookSecret: process.env.WAAPI_WEBHOOK_SECRET
+});
+
+app.post('/api/webhook/whatsapp', async (req, res) => {
+  // 1. Verifikasi signature
+  const signature = req.headers['x-webhook-signature'];
+  if (!waapi.verifyWebhookSignature(req.body, signature)) {
+    return res.status(401).json({ error: 'Invalid signature' });
+  }
+
+  const { event, instance_id, data } = req.body;
+
+  // 2. Handle berdasarkan event
+  switch (event) {
+    case 'message.received':
+      console.log(`Pesan masuk dari ${data.sender_jid}: ${data.content}`);
+      
+      // Simpan ke database CRM
+      await db.messages.create({
+        phone: data.sender_jid.replace('@s.whatsapp.net', ''),
+        content: data.content,
+        type: data.message_type,
+        media_url: data.media_url || null,
+        mime_type: data.mime_type || null,
+        file_size: data.file_size || null,
+        file_name: data.file_name || null,
+        wa_message_id: data.wa_message_id,
+        direction: 'incoming',
+        received_at: new Date(data.timestamp)
+      });
+      
+      // Auto-reply contoh
+      if (data.content?.toLowerCase().includes('harga')) {
+        await waapi.sendText(
+          data.sender_jid.replace('@s.whatsapp.net', ''),
+          'Terima kasih! Berikut daftar harga kami:\n1. Paket A: Rp 100.000\n2. Paket B: Rp 200.000'
+        );
+      }
+      break;
+      
+    case 'message.delivered':
+      await db.messages.update(
+        { wa_message_id: data.wa_message_id },
+        { status: 'delivered' }
+      );
+      break;
+      
+    case 'message.read':
+      await db.messages.update(
+        { wa_message_id: data.wa_message_id },
+        { status: 'read' }
+      );
+      break;
+      
+    case 'connection.disconnected':
+      // Kirim alert ke admin CRM
+      console.warn('⚠️ WhatsApp disconnected:', data.reason);
+      break;
+  }
+
+  // 3. Response 200 (WAJIB — kalau tidak, WAAPI akan retry sampai 5x)
+  res.status(200).json({ received: true });
+});
+
+app.listen(5000, () => {
+  console.log('CRM webhook listener running on port 5000');
+});
 ```
 
-### 4. Auto-Reply Workflows
+---
 
-Build complex workflows using webhook auto-reply:
+## Quick Start Checklist
 
-**n8n Workflow Example:**
-
-1. **Webhook trigger** - Receive `message.received`
-2. **Switch node** - Check message content
-3. **HTTP Request** - Fetch data from database
-4. **Set node** - Format response message
-5. **Webhook response** - Return `{ "message": "..." }`
-
-**Make.com Scenario:**
-
-1. **Webhooks** - Custom webhook
-2. **Router** - Multiple paths based on message
-3. **Google Sheets** - Lookup customer data
-4. **Text aggregator** - Create response
-5. **Webhook response** - Return JSON with `message` field
+- [ ] 1. Login ke Dashboard WAAPI (`http://localhost:3000`)
+- [ ] 2. Pastikan WhatsApp instance **connected** (scan QR jika belum)
+- [ ] 3. Buat API Key dengan permission yang dibutuhkan
+- [ ] 4. Simpan API Key di `.env` CRM
+- [ ] 5. Set Base URL WAAPI di CRM: `http://host.docker.internal:3001/api/v1`
+- [ ] 6. Buat endpoint webhook di CRM backend (contoh: `POST /api/webhook/whatsapp`)
+- [ ] 7. Configure webhook URL via API: `PUT /api/v1/webhook/config`
+- [ ] 8. Test kirim pesan: `POST /api/v1/messages/send-text`
+- [ ] 9. Test terima pesan: kirim WA ke nomor instance, cek webhook masuk ke CRM
+- [ ] 10. Implementasi handler untuk semua event yang disubscribe
 
 ---
 
-## Troubleshooting
-
-### Instance Not Connected
-
-**Problem:** Getting `INSTANCE_003: Instance not connected` error
-
-**Solutions:**
-1. Check instance status:
-   ```bash
-   curl "https://your-domain.com/api/v1/instances/{instance_id}/status" \
-     -H "X-API-Key: wa_your_key"
-   ```
-2. Get QR code and scan with WhatsApp app
-3. Restart instance if session corrupted
-4. Check if phone has internet connection
-
-### Invalid Phone Number
-
-**Problem:** `MESSAGE_002: Invalid phone number`
-
-**Solutions:**
-- Use international format without `+` or `-`
-- Remove spaces and special characters
-- Correct format: `628123456789` (Indonesia), `14155552671` (US)
-- Wrong format: `+62 812-3456-789`, `062-812-3456-789`
-
-### Daily Limit Reached
-
-**Problem:** `MESSAGE_004: Daily limit reached`
-
-**Solutions:**
-- Check warming phase limits
-- Distribute messages across multiple instances
-- Queue remaining messages for next day
-- Upgrade account age (wait for STABLE phase)
-
-### Messages Not Being Received
-
-**Problem:** Messages sent but not appearing in recipient's WhatsApp
-
-**Possible Causes:**
-1. **Recipient blocked you** - No error returned, message just won't deliver
-2. **Number doesn't exist** - Check if number is valid
-3. **Recipient's phone offline** - Message will deliver when they come online
-4. **Anti-spam filter** - Too many messages too fast
-
-**Solutions:**
-- Test with your own number first
-- Add delays between messages
-- Verify phone number format
-- Check instance health score
-
-### Webhook Not Receiving Events
-
-**Problem:** Configured webhook but not receiving POST requests
-
-**Solutions:**
-1. **Test webhook endpoint:**
-   ```bash
-   curl -X POST https://your-server.com/webhooks/whatsapp \
-     -H "Content-Type: application/json" \
-     -d '{"test": "payload"}'
-   ```
-2. **Check webhook logs** in dashboard
-3. **Verify webhook URL** is publicly accessible (not localhost)
-4. **Check SSL certificate** (webhook URL should be HTTPS)
-5. **Verify events** are selected in webhook config
-6. **Check firewall** rules on your server
-
-### Rate Limit Exceeded
-
-**Problem:** `MESSAGE_005: Rate limit exceeded` or `429 Too Many Requests`
-
-**Solutions:**
-- Slow down requests
-- Add delays between API calls
-- Check API key rate limit
-- Implement exponential backoff
-- Distribute load across multiple API keys
-
----
-
-## Security
-
-### API Key Security
-
-🔐 **Best Practices:**
-
-1. **Never expose API keys in:**
-   - Frontend JavaScript code
-   - Git repositories
-   - Public documentation
-   - Log files
-
-2. **Store securely:**
-   - Use environment variables
-   - Use secret management tools (AWS Secrets Manager, HashiCorp Vault)
-   - Encrypt at rest
-
-3. **Rotate regularly:**
-   - Create new API key
-   - Update applications
-   - Delete old API key
-
-4. **Use least privilege:**
-   - Only grant required permissions
-   - Create separate keys for different services
-   - Use `message:send` only if service just sends messages
-
-### Webhook Signature Verification
-
-Verify webhooks are from your API server using the webhook secret:
-
-```python
-import hmac
-import hashlib
-
-def verify_webhook_signature(payload, signature, secret):
-    """Verify webhook signature"""
-    expected = hmac.new(
-        secret.encode('utf-8'),
-        payload.encode('utf-8'),
-        hashlib.sha256
-    ).hexdigest()
-    
-    return hmac.compare_digest(expected, signature)
-
-@app.route('/webhooks/whatsapp', methods=['POST'])
-def webhook_handler():
-    # Get signature from header
-    signature = request.headers.get('X-Webhook-Signature')
-    
-    # Get raw payload
-    payload = request.get_data(as_text=True)
-    
-    # Verify signature
-    if not verify_webhook_signature(payload, signature, WEBHOOK_SECRET):
-        return jsonify({"error": "Invalid signature"}), 401
-    
-    # Process webhook
-    data = request.json
-    # ... handle event
-    
-    return jsonify({"status": "ok"})
-```
-
-### HTTPS Only
-
-Always use HTTPS for:
-- API requests
-- Webhook endpoints
-- Media URLs
-
-### IP Whitelisting
-
-For extra security, whitelist API server IPs at your firewall.
-
-### Monitor for Abuse
-
-Set up alerts for:
-- Unusual API usage patterns
-- Failed authentication attempts
-- Rapid message sending
-- High error rates
-
----
-
-## Additional Resources
-
-### API Documentation
-- **Swagger UI**: `https://your-domain.com/docs`
-- **OpenAPI Spec**: Available at `/docs/json`
-
-### Status Page
-- Monitor API uptime and performance
-
-### Support
-- Email: support@yourdomain.com
-- Documentation: docs.yourdomain.com
-- GitHub Issues: github.com/yourorg/whatsapp-api
-
-### Rate Limits Summary
-
-| Resource | Limit |
-|----------|-------|
-| API requests | 1000/hour (configurable per key) |
-| Message sending | Based on warming phase |
-| Webhook deliveries | No limit |
-| Contact creation | 100/minute |
-
----
-
-## Changelog
-
-**v1.0.0** (February 2026)
-- Initial release
-- Text, media, location messaging
-- Webhook support with auto-reply
-- Contact management
-- Broadcast campaigns
-- Multi-instance support
-- Rate limiting & warming phases
-
----
-
-## License & Terms
-
-This is an **unofficial** WhatsApp API using the open-source Baileys library. Use at your own risk. WhatsApp may ban accounts that violate their Terms of Service.
-
-**Not affiliated with Meta/WhatsApp.**
-
----
-
-**Questions? Issues? Contact us or open a GitHub issue!**
+*Dokumentasi ini dibuat untuk integrasi CRM-DADI dengan WAAPI. Terakhir diupdate: 16 Februari 2026.*

@@ -56,12 +56,39 @@ export class SyncService {
 
     for (const rc of remoteConversations) {
       const chatJid = rc.chat_jid || '';
-      const phone = rc.phone_number || chatJid.replace(/@s\.whatsapp\.net$/, '').replace(/@g\.us$/, '').replace(/@lid$/, '') || '';
+      if (!chatJid) continue;
 
-      if (!chatJid || !phone) continue;
-
-      // Skip group chats and self-chat
+      // Skip group chats
       if (chatJid.includes('@g.us')) continue;
+
+      // Determine phone number:
+      // 1. WA API /conversations already auto-resolves LID→phone (check rc.phone_number)
+      // 2. For @s.whatsapp.net JIDs, extract phone from JID
+      // 3. For @lid JIDs without phone_number, try resolveLid endpoint
+      // 4. If still no phone → skip (unresolvable LID, WhatsApp limitation)
+      let phone = rc.phone_number || '';
+
+      if (!phone && chatJid.endsWith('@s.whatsapp.net')) {
+        phone = chatJid.replace(/@s\.whatsapp\.net$/, '');
+      }
+
+      if (!phone && chatJid.endsWith('@lid')) {
+        try {
+          const resolved = await waClient.resolveLid(chatJid, instance.wa_instance_id);
+          if (resolved?.phone_number) {
+            phone = resolved.phone_number;
+            console.log(`📡 Sync: Resolved LID ${chatJid} → ${phone}`);
+          }
+        } catch (err: any) {
+          // resolveLid returns null for 404, throws for other errors
+          console.warn(`Sync: Failed to resolve LID ${chatJid}:`, err.message);
+        }
+      }
+
+      // No phone number = skip (unresolvable LID or invalid data)
+      if (!phone) continue;
+
+      // Skip self-chat
       if (instancePhone && phone === instancePhone) continue;
 
       try {
@@ -89,7 +116,7 @@ export class SyncService {
         // Skip this conversation entirely if no valid messages after filtering
         if (validMessages.length === 0) continue;
 
-        // Find or create contact
+        // Find or create contact — always keyed by real phone number
         let contact = await prisma.contact.findFirst({
           where: { organization_id: organizationId, phone_number: phone },
         });
@@ -110,11 +137,15 @@ export class SyncService {
           syncedContacts++;
         }
 
+        // For @lid conversations with resolved phone, store conversation under phone-based JID
+        // so chat history is unified under one conversation per contact
+        const conversationJid = chatJid.endsWith('@lid') ? `${phone}@s.whatsapp.net` : chatJid;
+
         // Find or create conversation
         const conversation = await conversationService.findOrCreate(
           organizationId,
           instance.id,
-          chatJid,
+          conversationJid,
           contact.id
         );
 
@@ -130,10 +161,17 @@ export class SyncService {
           });
 
           if (existing) {
+            const updates: Record<string, any> = {};
             if (!existing.content && msgContent) {
+              updates.content = msgContent;
+            }
+            if (!existing.media_url && rm.media_url) {
+              updates.media_url = rm.media_url;
+            }
+            if (Object.keys(updates).length > 0) {
               await prisma.message.update({
                 where: { id: existing.id },
-                data: { content: msgContent },
+                data: updates,
               });
             }
             continue;
@@ -181,9 +219,8 @@ export class SyncService {
             where: { id: conversation.id },
             data: {
               last_message_at: latestMsg.created_at,
-              last_message_preview: latestMsg.content || latestMsg.caption || `[${latestMsg.message_type}]`,
+              last_message_preview: (latestMsg.content || latestMsg.caption || `[${latestMsg.message_type}]`).slice(0, 255),
               last_message_direction: latestMsg.direction,
-              unread_count: rc.unread_count || 0,
               total_messages: await prisma.message.count({ where: { conversation_id: conversation.id } }),
             },
           });
@@ -284,12 +321,13 @@ export class SyncService {
     let syncedMessages = 0;
 
     // Only check top 5 most recent conversations for new messages
-    // Skip group chats and self-chat; allow @lid if phone_number is available
+    // Skip group chats and conversations without resolvable phone
     const recentConvs = remoteConversations
       .filter((rc: any) => {
         const jid = rc.chat_jid || '';
-        const ph = rc.phone_number || jid.replace(/@s\.whatsapp\.net$/, '').replace(/@lid$/, '');
         if (!jid || jid.includes('@g.us')) return false;
+        const ph = rc.phone_number || (jid.endsWith('@s.whatsapp.net') ? jid.replace(/@s\.whatsapp\.net$/, '') : '');
+        if (!ph) return false;
         if (instancePhone && ph === instancePhone) return false;
         return true;
       })
@@ -297,12 +335,18 @@ export class SyncService {
 
     for (const rc of recentConvs) {
       const chatJid = rc.chat_jid || '';
-      const phone = rc.phone_number || chatJid.replace(/@s\.whatsapp\.net$/, '').replace(/@g\.us$/, '').replace(/@lid$/, '') || '';
+      let phone = rc.phone_number || '';
+      if (!phone && chatJid.endsWith('@s.whatsapp.net')) {
+        phone = chatJid.replace(/@s\.whatsapp\.net$/, '');
+      }
       if (!chatJid || !phone) continue;
+
+      // For @lid conversations, lookup by phone-based JID (same as syncFromWaApi stores them)
+      const conversationJid = chatJid.endsWith('@lid') ? `${phone}@s.whatsapp.net` : chatJid;
 
       try {
         const conversation = await prisma.conversation.findFirst({
-          where: { organization_id: organizationId, chat_jid: chatJid },
+          where: { organization_id: organizationId, chat_jid: conversationJid },
         });
         if (!conversation) continue;
 
@@ -362,9 +406,8 @@ export class SyncService {
             where: { id: conversation.id },
             data: {
               last_message_at: latestMsg.created_at,
-              last_message_preview: latestMsg.content || latestMsg.caption || `[${latestMsg.message_type}]`,
+              last_message_preview: (latestMsg.content || latestMsg.caption || `[${latestMsg.message_type}]`).slice(0, 255),
               last_message_direction: latestMsg.direction,
-              unread_count: rc.unread_count || 0,
             },
           });
         }

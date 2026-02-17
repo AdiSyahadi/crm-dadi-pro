@@ -67,8 +67,8 @@ export class MessageService {
     try {
       const waClient = await WAApiClient.forOrganization(organizationId);
       const chatJid = conversation.chat_jid;
-      const phone = chatJid.replace(/@s\.whatsapp\.net$/, '').replace(/@lid$/, '').replace(/@g\.us$/, '');
-      const result = await waClient.sendText(instance.wa_instance_id, phone, content, chatJid);
+      const phone = chatJid.replace(/@s\.whatsapp\.net$/, '').replace(/@g\.us$/, '');
+      const result = await waClient.sendText(instance.wa_instance_id, phone, content);
 
       // Update message with WA message ID
       await prisma.message.update({
@@ -136,8 +136,8 @@ export class MessageService {
     try {
       const waClient = await WAApiClient.forOrganization(organizationId);
       const chatJid = conversation.chat_jid;
-      const phone = chatJid.replace(/@s\.whatsapp\.net$/, '').replace(/@lid$/, '').replace(/@g\.us$/, '');
-      const result = await waClient.sendMedia(instance.wa_instance_id, phone, caption || '', mediaUrl, mediaType, chatJid);
+      const phone = chatJid.replace(/@s\.whatsapp\.net$/, '').replace(/@g\.us$/, '');
+      const result = await waClient.sendMedia(instance.wa_instance_id, phone, caption || '', mediaUrl, mediaType);
 
       await prisma.message.update({
         where: { id: message.id },
