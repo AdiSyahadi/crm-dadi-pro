@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
-import { Textarea } from '@/components/ui/textarea';
+import { WATextarea } from '@/components/ui/wa-textarea';
 import {
   Dialog,
   DialogContent,
@@ -112,11 +112,11 @@ export default function TemplatesPage() {
               </div>
               <div className="space-y-2">
                 <Label>Isi Pesan</Label>
-                <Textarea
+                <WATextarea
                   placeholder="Halo {{name}}, terima kasih telah menghubungi kami..."
                   rows={5}
                   value={form.content}
-                  onChange={(e) => setForm({ ...form, content: e.target.value })}
+                  onChange={(v) => setForm({ ...form, content: v })}
                   required
                 />
                 <p className="text-xs text-muted-foreground">Gunakan {"{{variable}}"} untuk variabel dinamis</p>

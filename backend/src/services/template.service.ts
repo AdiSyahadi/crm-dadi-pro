@@ -88,6 +88,15 @@ export class TemplateService {
       data: { is_active: !template.is_active },
     });
   }
+
+  async incrementUsage(organizationId: string, templateId: string) {
+    // Verify template belongs to org, then increment
+    await this.getById(organizationId, templateId);
+    return prisma.messageTemplate.update({
+      where: { id: templateId },
+      data: { usage_count: { increment: 1 } },
+    });
+  }
 }
 
 export const templateService = new TemplateService();

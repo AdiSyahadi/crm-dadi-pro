@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useAuthStore } from '@/stores/auth.store';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '@/lib/api';
 import { Button } from '@/components/ui/button';
@@ -24,7 +25,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Plus, UsersRound, UserPlus, Loader2, Trash2, Shield } from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { Plus, UsersRound, UserPlus, Loader2, Trash2, Shield, MoreVertical, KeyRound, UserX, UserCheck, ShieldCheck, Copy, Link2, CheckCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 
@@ -37,10 +45,18 @@ const roleColors: Record<string, string> = {
 
 export default function TeamPage() {
   const queryClient = useQueryClient();
+  const userRole = useAuthStore((s) => s.user?.role);
+  const isAdmin = userRole === 'OWNER' || userRole === 'ADMIN';
+  const currentUserId = useAuthStore((s) => s.user?.id);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [teamOpen, setTeamOpen] = useState(false);
-  const [inviteForm, setInviteForm] = useState({ name: '', email: '', password: '', role: 'AGENT' });
+  const [inviteForm, setInviteForm] = useState({ name: '', email: '', role: 'AGENT' });
+  const [inviteLink, setInviteLink] = useState<string | null>(null);
+  const [linkCopied, setLinkCopied] = useState(false);
   const [teamForm, setTeamForm] = useState({ name: '', description: '' });
+  const [resetPwOpen, setResetPwOpen] = useState(false);
+  const [resetPwTarget, setResetPwTarget] = useState<{ id: string; name: string } | null>(null);
+  const [resetPwValue, setResetPwValue] = useState('');
 
   const { data: users = [], isLoading: loadingUsers } = useQuery({
     queryKey: ['team-users'],
@@ -60,13 +76,21 @@ export default function TeamPage() {
 
   const inviteMutation = useMutation({
     mutationFn: async (input: typeof inviteForm) => {
-      await api.post('/teams/users/invite', input);
+      const { data } = await api.post('/teams/users/invite', input);
+      return data.data;
     },
-    onSuccess: () => {
+    onSuccess: (data: any) => {
       queryClient.invalidateQueries({ queryKey: ['team-users'] });
-      setInviteOpen(false);
-      setInviteForm({ name: '', email: '', password: '', role: 'AGENT' });
-      toast.success('User berhasil diundang');
+      if (data?.invite_token) {
+        const baseUrl = window.location.origin;
+        setInviteLink(`${baseUrl}/accept-invite?token=${data.invite_token}`);
+        toast.success('Undangan berhasil dibuat. Salin link untuk dikirim ke anggota.');
+      } else {
+        setInviteOpen(false);
+        setInviteLink(null);
+        toast.success('User berhasil diundang');
+      }
+      setInviteForm({ name: '', email: '', role: 'AGENT' });
     },
     onError: (err: any) => toast.error(err.response?.data?.error?.message || 'Gagal mengundang'),
   });
@@ -82,6 +106,30 @@ export default function TeamPage() {
       toast.success('Tim berhasil dibuat');
     },
     onError: (err: any) => toast.error(err.response?.data?.error?.message || 'Gagal membuat tim'),
+  });
+
+  const updateUserMutation = useMutation({
+    mutationFn: async ({ userId, data }: { userId: string; data: any }) => {
+      await api.patch(`/teams/users/${userId}`, data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['team-users'] });
+      toast.success('User berhasil diperbarui');
+    },
+    onError: (err: any) => toast.error(err.response?.data?.error?.message || 'Gagal memperbarui user'),
+  });
+
+  const resetPwMutation = useMutation({
+    mutationFn: async ({ userId, password }: { userId: string; password: string }) => {
+      await api.post(`/teams/users/${userId}/reset-password`, { password });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['team-users'] });
+      setResetPwOpen(false);
+      setResetPwValue('');
+      toast.success('Password berhasil direset');
+    },
+    onError: (err: any) => toast.error(err.response?.data?.error?.message || 'Gagal reset password'),
   });
 
   const deleteTeamMutation = useMutation({
@@ -113,7 +161,7 @@ export default function TeamPage() {
         {/* Members Tab */}
         <TabsContent value="members" className="space-y-4">
           <div className="flex justify-end">
-            <Dialog open={inviteOpen} onOpenChange={setInviteOpen}>
+            {isAdmin && <Dialog open={inviteOpen} onOpenChange={setInviteOpen}>
               <DialogTrigger asChild>
                 <Button>
                   <UserPlus className="h-4 w-4 mr-2" />
@@ -124,63 +172,89 @@ export default function TeamPage() {
                 <DialogHeader>
                   <DialogTitle>Undang Anggota Baru</DialogTitle>
                 </DialogHeader>
-                <form
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    inviteMutation.mutate(inviteForm);
-                  }}
-                  className="space-y-4"
-                >
-                  <div className="space-y-2">
-                    <Label>Nama</Label>
-                    <Input
-                      placeholder="John Doe"
-                      value={inviteForm.name}
-                      onChange={(e) => setInviteForm({ ...inviteForm, name: e.target.value })}
-                      required
-                    />
+                {inviteLink ? (
+                  <div className="space-y-4">
+                    <div className="rounded-lg border p-4 bg-emerald-50">
+                      <div className="flex items-center gap-2 mb-2">
+                        <CheckCircle className="h-5 w-5 text-emerald-600" />
+                        <p className="text-sm font-semibold text-emerald-700">Undangan Berhasil Dibuat</p>
+                      </div>
+                      <p className="text-xs text-muted-foreground mb-3">
+                        Kirim link berikut ke anggota baru. Mereka akan mengatur password sendiri. Link berlaku 48 jam.
+                      </p>
+                      <div className="flex gap-2">
+                        <Input value={inviteLink} readOnly className="text-xs bg-white" />
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          className="shrink-0"
+                          onClick={() => {
+                            navigator.clipboard.writeText(inviteLink);
+                            setLinkCopied(true);
+                            toast.success('Link disalin!');
+                            setTimeout(() => setLinkCopied(false), 2000);
+                          }}
+                        >
+                          {linkCopied ? <CheckCircle className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />}
+                        </Button>
+                      </div>
+                    </div>
+                    <Button variant="outline" className="w-full" onClick={() => { setInviteLink(null); setInviteOpen(false); setLinkCopied(false); }}>
+                      Tutup
+                    </Button>
                   </div>
-                  <div className="space-y-2">
-                    <Label>Email</Label>
-                    <Input
-                      type="email"
-                      placeholder="john@perusahaan.com"
-                      value={inviteForm.email}
-                      onChange={(e) => setInviteForm({ ...inviteForm, email: e.target.value })}
-                      required
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Password</Label>
-                    <Input
-                      type="password"
-                      placeholder="Minimal 6 karakter"
-                      value={inviteForm.password}
-                      onChange={(e) => setInviteForm({ ...inviteForm, password: e.target.value })}
-                      required
-                      minLength={6}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Role</Label>
-                    <Select value={inviteForm.role} onValueChange={(v) => setInviteForm({ ...inviteForm, role: v })}>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="ADMIN">Admin</SelectItem>
-                        <SelectItem value="SUPERVISOR">Supervisor</SelectItem>
-                        <SelectItem value="AGENT">Agent</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <Button type="submit" className="w-full" disabled={inviteMutation.isPending}>
-                    {inviteMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-                    Undang
-                  </Button>
-                </form>
+                ) : (
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      inviteMutation.mutate(inviteForm);
+                    }}
+                    className="space-y-4"
+                  >
+                    <div className="space-y-2">
+                      <Label>Nama</Label>
+                      <Input
+                        placeholder="John Doe"
+                        value={inviteForm.name}
+                        onChange={(e) => setInviteForm({ ...inviteForm, name: e.target.value })}
+                        required
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Email</Label>
+                      <Input
+                        type="email"
+                        placeholder="john@perusahaan.com"
+                        value={inviteForm.email}
+                        onChange={(e) => setInviteForm({ ...inviteForm, email: e.target.value })}
+                        required
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Role</Label>
+                      <Select value={inviteForm.role} onValueChange={(v) => setInviteForm({ ...inviteForm, role: v })}>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="ADMIN">Admin</SelectItem>
+                          <SelectItem value="SUPERVISOR">Supervisor</SelectItem>
+                          <SelectItem value="AGENT">Agent</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                      <Link2 className="h-3.5 w-3.5" />
+                      Anggota akan menerima link untuk mengatur password sendiri.
+                    </p>
+                    <Button type="submit" className="w-full" disabled={inviteMutation.isPending}>
+                      {inviteMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                      Buat Undangan
+                    </Button>
+                  </form>
+                )}
               </DialogContent>
-            </Dialog>
+            </Dialog>}
           </div>
 
           {loadingUsers ? (
@@ -208,11 +282,53 @@ export default function TeamPage() {
                       <Badge variant="secondary" className={cn('text-[10px] shrink-0', roleColors[user.role] || '')}>
                         {user.role}
                       </Badge>
+                      {isAdmin && user.role !== 'OWNER' && user.id !== currentUserId && (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0">
+                              <MoreVertical className="h-3.5 w-3.5" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem className="text-xs" onClick={() => {
+                              const roles = ['ADMIN', 'SUPERVISOR', 'AGENT'];
+                              const currentIdx = roles.indexOf(user.role);
+                              const nextRole = roles[(currentIdx + 1) % roles.length];
+                              if (confirm(`Ubah role ${user.name} dari ${user.role} ke ${nextRole}?`)) {
+                                updateUserMutation.mutate({ userId: user.id, data: { role: nextRole } });
+                              }
+                            }}>
+                              <ShieldCheck className="h-3.5 w-3.5 mr-2" />
+                              Ubah Role → {['ADMIN', 'SUPERVISOR', 'AGENT'][((['ADMIN', 'SUPERVISOR', 'AGENT'].indexOf(user.role)) + 1) % 3]}
+                            </DropdownMenuItem>
+                            <DropdownMenuItem className="text-xs" onClick={() => {
+                              setResetPwTarget({ id: user.id, name: user.name });
+                              setResetPwOpen(true);
+                            }}>
+                              <KeyRound className="h-3.5 w-3.5 mr-2" />
+                              Reset Password
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem className="text-xs" onClick={() => {
+                              const action = user.is_active ? 'nonaktifkan' : 'aktifkan';
+                              if (confirm(`${action} akun ${user.name}?`)) {
+                                updateUserMutation.mutate({ userId: user.id, data: { is_active: !user.is_active } });
+                              }
+                            }}>
+                              {user.is_active ? (
+                                <><UserX className="h-3.5 w-3.5 mr-2 text-destructive" /><span className="text-destructive">Nonaktifkan</span></>
+                              ) : (
+                                <><UserCheck className="h-3.5 w-3.5 mr-2 text-emerald-600" /><span className="text-emerald-600">Aktifkan</span></>
+                              )}
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      )}
                     </div>
                     <div className="flex items-center justify-between mt-3 pt-3 border-t">
                       <div className="flex items-center gap-1 text-xs text-muted-foreground">
                         <Shield className="h-3 w-3" />
-                        <span>{user.is_active ? 'Aktif' : 'Nonaktif'}</span>
+                        <span className={!user.is_active ? 'text-destructive' : ''}>{user.is_active ? 'Aktif' : 'Nonaktif'}</span>
                       </div>
                       {user.phone && (
                         <span className="text-xs text-muted-foreground">{user.phone}</span>
@@ -228,7 +344,7 @@ export default function TeamPage() {
         {/* Teams Tab */}
         <TabsContent value="teams" className="space-y-4">
           <div className="flex justify-end">
-            <Dialog open={teamOpen} onOpenChange={setTeamOpen}>
+            {isAdmin && <Dialog open={teamOpen} onOpenChange={setTeamOpen}>
               <DialogTrigger asChild>
                 <Button>
                   <Plus className="h-4 w-4 mr-2" />
@@ -269,7 +385,7 @@ export default function TeamPage() {
                   </Button>
                 </form>
               </DialogContent>
-            </Dialog>
+            </Dialog>}
           </div>
 
           {loadingTeams ? (
@@ -295,7 +411,7 @@ export default function TeamPage() {
                           <p className="text-xs text-muted-foreground mt-0.5">{team.description}</p>
                         )}
                       </div>
-                      <Button
+                      {isAdmin && <Button
                         variant="ghost"
                         size="icon"
                         className="h-7 w-7 text-destructive"
@@ -304,7 +420,7 @@ export default function TeamPage() {
                         }}
                       >
                         <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
+                      </Button>}
                     </div>
                     <div className="flex items-center gap-2">
                       <Badge variant="outline" className="text-[10px]">
@@ -337,6 +453,43 @@ export default function TeamPage() {
           )}
         </TabsContent>
       </Tabs>
+
+      {/* Reset Password Dialog */}
+      <Dialog open={resetPwOpen} onOpenChange={(open) => { setResetPwOpen(open); if (!open) setResetPwValue(''); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <KeyRound className="h-5 w-5" /> Reset Password
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Reset password untuk <strong>{resetPwTarget?.name}</strong>. User akan diminta login ulang.
+          </p>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (resetPwTarget) resetPwMutation.mutate({ userId: resetPwTarget.id, password: resetPwValue });
+            }}
+            className="space-y-4"
+          >
+            <div className="space-y-2">
+              <Label>Password Baru</Label>
+              <Input
+                type="password"
+                placeholder="Minimal 8 karakter"
+                value={resetPwValue}
+                onChange={(e) => setResetPwValue(e.target.value)}
+                required
+                minLength={8}
+              />
+            </div>
+            <Button type="submit" className="w-full" disabled={resetPwMutation.isPending}>
+              {resetPwMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              Reset Password
+            </Button>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

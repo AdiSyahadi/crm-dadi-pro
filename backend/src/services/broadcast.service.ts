@@ -2,6 +2,7 @@ import { prisma } from '../config/database';
 import { AppError } from '../utils/app-error';
 import { WAApiClient } from './wa-api.client';
 import { CreateBroadcastInput, ListBroadcastsInput } from '../validators/broadcast.validator';
+import { templateService } from './template.service';
 import { Queue } from 'bullmq';
 import { redis } from '../config/redis';
 
@@ -64,10 +65,40 @@ export class BroadcastService {
     });
     if (!instance) throw AppError.notFound('WA Instance not found');
 
+    // Validate recipient_tag_ids if provided
+    if (input.recipient_tag_ids && input.recipient_tag_ids.length > 0) {
+      const tagCount = await prisma.tag.count({
+        where: { id: { in: input.recipient_tag_ids }, organization_id: organizationId },
+      });
+      if (tagCount !== input.recipient_tag_ids.length) {
+        throw AppError.badRequest('Satu atau lebih tag tidak ditemukan');
+      }
+    }
+
+    // Collect contact IDs: manual selection + tag-based
+    const contactIdSet = new Set<string>(input.recipient_contact_ids || []);
+
+    // Resolve contacts from tags
+    if (input.recipient_tag_ids && input.recipient_tag_ids.length > 0) {
+      const tagContacts = await prisma.contact.findMany({
+        where: {
+          organization_id: organizationId,
+          is_blocked: false,
+          is_subscribed: true,
+          phone_number: { not: '' },
+          contact_tags: { some: { tag_id: { in: input.recipient_tag_ids } } },
+        },
+        select: { id: true },
+      });
+      for (const c of tagContacts) {
+        contactIdSet.add(c.id);
+      }
+    }
+
     // Get contacts with valid phone numbers
     const contacts = await prisma.contact.findMany({
       where: {
-        id: { in: input.recipient_contact_ids },
+        id: { in: Array.from(contactIdSet) },
         organization_id: organizationId,
         is_subscribed: true,
         is_blocked: false,
@@ -77,7 +108,7 @@ export class BroadcastService {
     });
 
     if (contacts.length === 0) {
-      throw AppError.badRequest('Tidak ada penerima dengan nomor HP valid.');
+      throw AppError.badRequest('Tidak ada penerima dengan nomor HP valid. Pilih kontak manual atau tag yang memiliki kontak.');
     }
 
     const broadcast = await prisma.broadcast.create({
@@ -106,6 +137,11 @@ export class BroadcastService {
         phone_number: c.phone_number,
       })),
     });
+
+    // Increment template usage_count if template_id provided
+    if (input.template_id) {
+      await templateService.incrementUsage(organizationId, input.template_id).catch(() => {});
+    }
 
     return this.getById(organizationId, broadcast.id);
   }

@@ -27,8 +27,13 @@ app.use(cors({
       }
     }
 
-    // In production, only allow configured frontend URL
-    if (origin === env.FRONTEND_URL) {
+    // In production, allow configured frontend URL and its localhost/127.0.0.1 equivalent
+    const allowed = [
+      env.FRONTEND_URL,
+      env.FRONTEND_URL.replace('://localhost', '://127.0.0.1'),
+      env.FRONTEND_URL.replace('://127.0.0.1', '://localhost'),
+    ];
+    if (allowed.includes(origin)) {
       return callback(null, true);
     }
 

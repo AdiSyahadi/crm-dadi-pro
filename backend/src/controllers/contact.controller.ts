@@ -7,7 +7,9 @@ export class ContactController {
   async list(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const input = listContactsSchema.parse(req.query);
-      const result = await contactService.list(req.user!.organizationId, input);
+      // AGENT can only see contacts that have conversations assigned to them
+      const assignedToUserId = req.user!.role === 'AGENT' ? req.user!.userId : undefined;
+      const result = await contactService.list(req.user!.organizationId, input, assignedToUserId);
       sendSuccess(res, result.contacts, undefined, 200, result.meta);
     } catch (error) {
       next(error);
@@ -16,7 +18,8 @@ export class ContactController {
 
   async getById(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const contact = await contactService.getById(req.user!.organizationId, req.params.id as string);
+      const assignedToUserId = req.user!.role === 'AGENT' ? req.user!.userId : undefined;
+      const contact = await contactService.getById(req.user!.organizationId, req.params.id as string, assignedToUserId);
       sendSuccess(res, contact);
     } catch (error) {
       next(error);
@@ -47,6 +50,58 @@ export class ContactController {
     try {
       await contactService.delete(req.user!.organizationId, req.params.id as string);
       sendNoContent(res);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async listTags(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const tags = await contactService.listTags(req.user!.organizationId);
+      sendSuccess(res, tags);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async createTag(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const { name, color, description } = req.body;
+      if (!name) { res.status(400).json({ success: false, message: 'Name is required' }); return; }
+      const tag = await contactService.createTag(req.user!.organizationId, { name, color, description });
+      sendCreated(res, tag, 'Label created');
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async updateTag(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const tag = await contactService.updateTag(req.user!.organizationId, req.params.id as string, req.body);
+      sendSuccess(res, tag, 'Label updated');
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async deleteTag(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      await contactService.deleteTag(req.user!.organizationId, req.params.id as string);
+      sendNoContent(res);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async bulkAssignTags(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const { contact_ids, tags } = req.body;
+      if (!contact_ids?.length || !tags?.length) {
+        res.status(400).json({ success: false, message: 'contact_ids and tags are required' });
+        return;
+      }
+      const result = await contactService.bulkAssignTags(req.user!.organizationId, contact_ids, tags);
+      sendSuccess(res, result, 'Tags assigned');
     } catch (error) {
       next(error);
     }

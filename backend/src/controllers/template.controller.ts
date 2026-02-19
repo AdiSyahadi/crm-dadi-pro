@@ -60,6 +60,15 @@ export class TemplateController {
       next(error);
     }
   }
+
+  async use(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const template = await templateService.incrementUsage(req.user!.organizationId, req.params.id as string);
+      sendSuccess(res, template, 'Template usage recorded');
+    } catch (error) {
+      next(error);
+    }
+  }
 }
 
 export const templateController = new TemplateController();

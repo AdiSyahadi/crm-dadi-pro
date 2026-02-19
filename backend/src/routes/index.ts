@@ -11,6 +11,9 @@ import teamRoutes from './team.routes';
 import webhookRoutes from './webhook.routes';
 import settingsRoutes from './settings.routes';
 import mediaRoutes from './media.routes';
+import scheduledMessageRoutes from './scheduled-message.routes';
+import webhookConfigRoutes from './webhook-config.routes';
+import autoResponseRoutes from './auto-response.routes';
 
 const router = Router();
 
@@ -40,6 +43,9 @@ router.use('/analytics', analyticsRoutes);
 router.use('/teams', teamRoutes);
 router.use('/settings', settingsRoutes);
 router.use('/media', mediaRoutes);
+router.use('/scheduled-messages', scheduledMessageRoutes);
+router.use('/webhook-configs', webhookConfigRoutes);
+router.use('/auto-responses', autoResponseRoutes);
 
 // Webhook (public, verified by signature)
 router.use('/webhook', webhookRoutes);

@@ -10,6 +10,7 @@ import {
   Users,
   Handshake,
   Send,
+  CalendarClock,
   FileText,
   BarChart3,
   UsersRound,
@@ -29,17 +30,22 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 
+const ALL_ROLES = ['OWNER', 'ADMIN', 'SUPERVISOR', 'AGENT'] as const;
+const MANAGEMENT = ['OWNER', 'ADMIN', 'SUPERVISOR'] as const;
+const ADMIN_UP = ['OWNER', 'ADMIN'] as const;
+
 const navItems = [
-  { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
-  { label: 'Chat', href: '/dashboard/chat', icon: MessageSquare, badge: true },
-  { label: 'Kontak', href: '/dashboard/contacts', icon: Users },
-  { label: 'Deals', href: '/dashboard/deals', icon: Handshake },
-  { label: 'Broadcast', href: '/dashboard/broadcasts', icon: Send },
-  { label: 'Template', href: '/dashboard/templates', icon: FileText },
-  { label: 'Instansi WA', href: '/dashboard/instances', icon: Wifi },
-  { label: 'Analitik', href: '/dashboard/analytics', icon: BarChart3 },
-  { label: 'Tim', href: '/dashboard/team', icon: UsersRound },
-  { label: 'Pengaturan', href: '/dashboard/settings', icon: Settings },
+  { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, roles: ALL_ROLES },
+  { label: 'Chat', href: '/dashboard/chat', icon: MessageSquare, badge: true, roles: ALL_ROLES },
+  { label: 'Kontak', href: '/dashboard/contacts', icon: Users, roles: ALL_ROLES },
+  { label: 'Deals', href: '/dashboard/deals', icon: Handshake, roles: ALL_ROLES },
+  { label: 'Broadcast', href: '/dashboard/broadcasts', icon: Send, roles: MANAGEMENT },
+  { label: 'Jadwal Pesan', href: '/dashboard/scheduled-messages', icon: CalendarClock, roles: MANAGEMENT },
+  { label: 'Template', href: '/dashboard/templates', icon: FileText, roles: ALL_ROLES },
+  { label: 'Instansi WA', href: '/dashboard/instances', icon: Wifi, roles: ADMIN_UP },
+  { label: 'Analitik', href: '/dashboard/analytics', icon: BarChart3, roles: MANAGEMENT },
+  { label: 'Tim', href: '/dashboard/team', icon: UsersRound, roles: MANAGEMENT },
+  { label: 'Pengaturan', href: '/dashboard/settings', icon: Settings, roles: ADMIN_UP },
 ];
 
 interface SidebarProps {
@@ -98,7 +104,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
         {/* Navigation */}
         <ScrollArea className="flex-1 py-3">
           <nav className="space-y-1 px-2">
-            {navItems.map((item) => {
+            {navItems.filter((item) => !user?.role || (item.roles as readonly string[]).includes(user.role)).map((item) => {
               const isActive = item.href === '/dashboard'
                 ? pathname === '/dashboard'
                 : pathname.startsWith(item.href);

@@ -9,6 +9,11 @@ const router = Router();
 router.use(authenticate, tenantGuard);
 
 router.get('/', contactController.list);
+router.get('/tags', contactController.listTags);
+router.post('/tags', contactController.createTag);
+router.patch('/tags/:id', contactController.updateTag);
+router.delete('/tags/:id', contactController.deleteTag);
+router.post('/bulk-assign-tags', contactController.bulkAssignTags);
 router.get('/:id', contactController.getById);
 router.post('/', contactController.create);
 router.patch('/:id', contactController.update);

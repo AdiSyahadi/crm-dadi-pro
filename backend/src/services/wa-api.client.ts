@@ -119,6 +119,30 @@ export class WAApiClient {
     return data;
   }
 
+  // POST /messages/edit — edit a sent message on WhatsApp
+  async editMessage(instanceId: string, messageId: string, chatJid: string, newText: string) {
+    const { data } = await this.client.post('/messages/edit', {
+      instance_id: instanceId,
+      message_id: messageId,
+      chat_jid: chatJid,
+      new_text: newText,
+    });
+    return data;
+  }
+
+  // POST /messages/delete — delete/recall a message on WhatsApp
+  async deleteMessage(instanceId: string, messageId: string, chatJid: string, options?: { fromMe?: boolean; participant?: string; deleteFor?: 'everyone' | 'me' }) {
+    const { data } = await this.client.post('/messages/delete', {
+      instance_id: instanceId,
+      message_id: messageId,
+      chat_jid: chatJid,
+      from_me: options?.fromMe ?? true,
+      ...(options?.participant ? { participant: options.participant } : {}),
+      delete_for: options?.deleteFor || 'everyone',
+    });
+    return data;
+  }
+
   // GET /messages?instance_id=x&search=keyword
   async searchMessages(instanceId: string, search: string, limit = 50) {
     const { data } = await this.client.get('/messages', {

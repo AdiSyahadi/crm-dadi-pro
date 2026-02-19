@@ -87,8 +87,18 @@ export class TeamController {
 
   async updateUser(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const user = await teamService.updateUser(req.user!.organizationId, req.params.userId as string, req.body);
+      const user = await teamService.updateUser(req.user!.organizationId, req.params.userId as string, req.body, req.user!.userId);
       sendSuccess(res, user, 'User updated');
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async resetPassword(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const { password } = req.body;
+      await teamService.resetPassword(req.user!.organizationId, req.params.userId as string, password);
+      sendSuccess(res, null, 'Password berhasil direset');
     } catch (error) {
       next(error);
     }

@@ -1,5 +1,6 @@
 import { prisma } from '../config/database';
 import { AppError } from '../utils/app-error';
+import { dispatchWebhookEvent } from './webhook-dispatcher.service';
 
 export class ConversationService {
   async list(organizationId: string, query: {
@@ -9,6 +10,7 @@ export class ConversationService {
     assigned_to?: string;
     search?: string;
     instance_id?: string;
+    label?: string;
   }) {
     const page = query.page || 1;
     const limit = query.limit || 20;
@@ -20,8 +22,18 @@ export class ConversationService {
     };
 
     if (query.status) where.status = query.status;
-    if (query.assigned_to) where.assigned_to_user_id = query.assigned_to;
+    if (query.assigned_to === 'unassigned') {
+      where.assigned_to_user_id = null;
+    } else if (query.assigned_to) {
+      where.assigned_to_user_id = query.assigned_to;
+    }
     if (query.instance_id) where.instance_id = query.instance_id;
+    if (query.label) {
+      where.contact = {
+        ...where.contact,
+        contact_tags: { some: { tag: { name: query.label } } },
+      };
+    }
 
     if (query.search) {
       where.OR = [
@@ -134,7 +146,7 @@ export class ConversationService {
     });
 
     // Update conversation
-    return prisma.conversation.update({
+    const updated = await prisma.conversation.update({
       where: { id: conversationId },
       data: {
         assigned_to_user_id: userId || null,
@@ -147,12 +159,21 @@ export class ConversationService {
         assigned_to_team: { select: { id: true, name: true } },
       },
     });
+
+    dispatchWebhookEvent(organizationId, 'conversation.assigned', {
+      conversation_id: conversationId,
+      assigned_to_user: updated.assigned_to_user,
+      assigned_to_team: updated.assigned_to_team,
+      contact: updated.contact,
+    });
+
+    return updated;
   }
 
   async resolve(organizationId: string, conversationId: string, resolvedById: string) {
     await this.getById(organizationId, conversationId);
 
-    return prisma.conversation.update({
+    const resolved = await prisma.conversation.update({
       where: { id: conversationId },
       data: {
         status: 'RESOLVED',
@@ -160,12 +181,19 @@ export class ConversationService {
         resolved_by_id: resolvedById,
       },
     });
+
+    dispatchWebhookEvent(organizationId, 'conversation.resolved', {
+      conversation_id: conversationId,
+      resolved_by: resolvedById,
+    });
+
+    return resolved;
   }
 
   async reopen(organizationId: string, conversationId: string) {
     await this.getById(organizationId, conversationId);
 
-    return prisma.conversation.update({
+    const reopened = await prisma.conversation.update({
       where: { id: conversationId },
       data: {
         status: 'OPEN',
@@ -173,9 +201,15 @@ export class ConversationService {
         resolved_by_id: null,
       },
     });
+
+    dispatchWebhookEvent(organizationId, 'conversation.reopened', {
+      conversation_id: conversationId,
+    });
+
+    return reopened;
   }
 
-  async updateLastMessage(conversationId: string, preview: string, direction: 'INCOMING' | 'OUTGOING') {
+  async updateLastMessage(organizationId: string, conversationId: string, preview: string, direction: 'INCOMING' | 'OUTGOING') {
     const updateData: any = {
       last_message_at: new Date(),
       last_message_preview: preview.substring(0, 200),
@@ -188,9 +222,24 @@ export class ConversationService {
     }
 
     await prisma.conversation.update({
-      where: { id: conversationId },
+      where: { id: conversationId, organization_id: organizationId },
       data: updateData,
     });
+  }
+
+  /**
+   * Return all tags for the organization.
+   * All roles see the same tag options; data isolation is enforced
+   * by the list() method which filters conversations by assigned_to for AGENT.
+   */
+  async listLabels(organizationId: string) {
+    const rows = await prisma.tag.findMany({
+      where: { organization_id: organizationId },
+      select: { name: true, color: true },
+      orderBy: { name: 'asc' },
+    });
+
+    return rows.map((r) => ({ label: r.name, color: r.color }));
   }
 
   async markAsRead(organizationId: string, conversationId: string) {

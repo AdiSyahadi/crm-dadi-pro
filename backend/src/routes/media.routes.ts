@@ -16,10 +16,15 @@ const upload = multer({
 // Requires JWT auth. Accepts multipart/form-data with field "file".
 router.post('/upload', authenticate, tenantGuard, upload.single('file'), mediaController.upload.bind(mediaController));
 
-// Public media proxy — no JWT required.
-// SSRF protection: only allows URLs whose origin matches WA API base URL.
-// Used by <img>/<video>/<audio> tags which cannot send Authorization headers.
-router.get('/wa-proxy', mediaController.publicProxy.bind(mediaController));
+// Media proxy for <img>/<video>/<audio> tags — JWT via ?token= query param.
+// SSRF protection: only allows URLs whose origin matches user's org WA API base URL.
+router.get('/wa-proxy', (req, res, next) => {
+  const queryToken = req.query.token as string;
+  if (queryToken && !req.headers.authorization) {
+    req.headers.authorization = `Bearer ${queryToken}`;
+  }
+  next();
+}, authenticate, tenantGuard, mediaController.proxy.bind(mediaController));
 
 // Authenticated proxy (kept for backward compat)
 router.get('/proxy', (req, res, next) => {

@@ -5,6 +5,7 @@ import { connectDatabase, disconnectDatabase } from './config/database';
 import { disconnectRedis } from './config/redis';
 import { initSocketIO } from './socket/io';
 import { startBroadcastWorker } from './workers/broadcast.worker';
+import { startScheduledMessageWorker } from './workers/scheduled-message.worker';
 import { syncService } from './services/sync.service';
 
 const server = http.createServer(app);
@@ -18,6 +19,7 @@ async function bootstrap(): Promise<void> {
 
   // Start background workers
   startBroadcastWorker();
+  startScheduledMessageWorker();
 
   // Start sync polling for new messages from WA API (every 2 min)
   syncService.startPolling(120_000);

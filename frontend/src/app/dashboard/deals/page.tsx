@@ -17,6 +17,13 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
   Plus,
   Handshake,
   TrendingUp,
@@ -25,6 +32,7 @@ import {
   Loader2,
   DollarSign,
   GripVertical,
+  User,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
@@ -63,6 +71,14 @@ export default function DealsPage() {
     queryFn: async () => {
       const { data } = await api.get('/deals?limit=100');
       return data.data as Deal[];
+    },
+  });
+
+  const { data: contacts = [] } = useQuery({
+    queryKey: ['contacts-for-deal'],
+    queryFn: async () => {
+      const { data } = await api.get('/contacts?limit=200');
+      return data.data as { id: string; name: string; phone_number: string }[];
     },
   });
 
@@ -168,6 +184,10 @@ export default function DealsPage() {
               <form
                 onSubmit={(e) => {
                   e.preventDefault();
+                  if (!form.contact_id) {
+                    toast.error('Pilih kontak terlebih dahulu');
+                    return;
+                  }
                   createMutation.mutate(form);
                 }}
                 className="space-y-4"
@@ -180,6 +200,27 @@ export default function DealsPage() {
                     onChange={(e) => setForm({ ...form, title: e.target.value })}
                     required
                   />
+                </div>
+                <div className="space-y-2">
+                  <Label>Kontak</Label>
+                  <Select
+                    value={form.contact_id}
+                    onValueChange={(v) => setForm({ ...form, contact_id: v })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Pilih kontak..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {contacts.map((c: any) => (
+                        <SelectItem key={c.id} value={c.id}>
+                          <span className="flex items-center gap-2">
+                            <User className="h-3.5 w-3.5 text-muted-foreground" />
+                            {c.name || c.phone_number}
+                          </span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className="space-y-2">
                   <Label>Nilai (IDR)</Label>

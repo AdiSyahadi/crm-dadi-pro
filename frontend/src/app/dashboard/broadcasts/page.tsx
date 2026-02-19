@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
-import { Textarea } from '@/components/ui/textarea';
+import { WATextarea } from '@/components/ui/wa-textarea';
 import {
   Dialog,
   DialogContent,
@@ -31,7 +31,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Send, Plus, Play, Pause, XCircle, Loader2, Radio, Search, Paperclip, X, FileText, Film, Music } from 'lucide-react';
+import { Send, Plus, Play, Pause, XCircle, Trash2, Loader2, Radio, Search, Paperclip, X, FileText, Film, Music, Tag } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
@@ -55,10 +55,12 @@ export default function BroadcastsPage() {
   const [formName, setFormName] = useState('');
   const [formInstanceId, setFormInstanceId] = useState('');
   const [formMessage, setFormMessage] = useState('');
+  const [formTagIds, setFormTagIds] = useState<string[]>([]);
   const [formSelectedContacts, setFormSelectedContacts] = useState<string[]>([]);
   const [formMediaFile, setFormMediaFile] = useState<File | null>(null);
   const [formMediaPreview, setFormMediaPreview] = useState<string | null>(null);
   const [formMediaUploading, setFormMediaUploading] = useState(false);
+  const [formTemplateId, setFormTemplateId] = useState<string>('');
   const bcFileInputRef = useRef<HTMLInputElement>(null);
 
   const getMediaTypeFromFile = (file: File): string => {
@@ -97,8 +99,10 @@ export default function BroadcastsPage() {
     setFormName('');
     setFormInstanceId('');
     setFormMessage('');
+    setFormTagIds([]);
     setFormSelectedContacts([]);
     setContactSearch('');
+    setFormTemplateId('');
     clearFormMedia();
   };
 
@@ -121,6 +125,28 @@ export default function BroadcastsPage() {
     },
   });
   const allContacts = contactsData?.data || [];
+
+  // Fetch tags for tag-based recipient selection
+  const { data: tagsData } = useQuery({
+    queryKey: ['tags'],
+    queryFn: async () => {
+      const { data } = await api.get('/contacts/tags');
+      return (data.data || []) as { id: string; name: string; color: string | null }[];
+    },
+  });
+  const tags = tagsData || [];
+
+  // Fetch active templates for auto-fill
+  const { data: templatesData } = useQuery({
+    queryKey: ['templates-active'],
+    queryFn: async () => {
+      const { data } = await api.get('/templates?is_active=true&limit=50');
+      return (data.data || []) as { id: string; name: string; category: string | null; content: string }[];
+    },
+    staleTime: 60_000,
+  });
+  const activeTemplates = templatesData || [];
+
   const filteredContacts = allContacts.filter((c: any) =>
     !contactSearch || c.name?.toLowerCase().includes(contactSearch.toLowerCase()) || c.phone_number?.includes(contactSearch)
   );
@@ -167,7 +193,9 @@ export default function BroadcastsPage() {
         name: formName,
         instance_id: formInstanceId,
         message_content: formMessage,
-        recipient_contact_ids: formSelectedContacts,
+        template_id: formTemplateId || undefined,
+        recipient_contact_ids: formSelectedContacts.length > 0 ? formSelectedContacts : undefined,
+        recipient_tag_ids: formTagIds.length > 0 ? formTagIds : undefined,
         ...(mediaUrl ? { media_url: mediaUrl, media_type: mediaType } : {}),
       });
     },
@@ -222,6 +250,15 @@ export default function BroadcastsPage() {
     },
   });
 
+  const deleteMutation = useMutation({
+    mutationFn: async (id: string) => { await api.delete(`/broadcasts/${id}`); },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['broadcasts'] });
+      toast.success('Broadcast dihapus');
+    },
+    onError: (err: any) => toast.error(err.response?.data?.error?.message || 'Gagal menghapus'),
+  });
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -263,9 +300,37 @@ export default function BroadcastsPage() {
               </Select>
             </div>
 
+            {/* Template auto-fill */}
+            {activeTemplates.length > 0 && (
+              <div className="space-y-2">
+                <Label>Gunakan Template (opsional)</Label>
+                <Select value={formTemplateId || '__none__'} onValueChange={(v) => {
+                  const id = v === '__none__' ? '' : v;
+                  setFormTemplateId(id);
+                  if (id) {
+                    const tpl = activeTemplates.find((t) => t.id === id);
+                    if (tpl) setFormMessage(tpl.content);
+                  }
+                }}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Pilih template..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">Tanpa Template</SelectItem>
+                    {activeTemplates.map((tpl) => (
+                      <SelectItem key={tpl.id} value={tpl.id}>
+                        {tpl.name}{tpl.category ? ` (${tpl.category})` : ''}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">Template akan mengisi pesan otomatis. Anda tetap bisa mengedit sebelum kirim.</p>
+              </div>
+            )}
+
             <div className="space-y-2">
               <Label htmlFor="bc-message">Isi Pesan</Label>
-              <Textarea id="bc-message" placeholder="Tulis pesan broadcast..." rows={4} value={formMessage} onChange={(e) => setFormMessage(e.target.value)} />
+              <WATextarea id="bc-message" placeholder="Tulis pesan broadcast..." rows={4} value={formMessage} onChange={(v) => setFormMessage(v)} />
               <p className="text-xs text-muted-foreground">{formMessage.length}/4096 karakter</p>
             </div>
 
@@ -309,9 +374,36 @@ export default function BroadcastsPage() {
               )}
             </div>
 
+            {/* Tag-based recipients */}
+            {tags.length > 0 && (
+              <div className="space-y-2">
+                <Label>Penerima Otomatis by Tag</Label>
+                <p className="text-xs text-muted-foreground">Semua kontak dengan tag ini otomatis menerima broadcast</p>
+                <div className="flex gap-2 flex-wrap">
+                  {tags.map((tag) => (
+                    <Button
+                      key={tag.id}
+                      type="button"
+                      variant={formTagIds.includes(tag.id) ? 'default' : 'outline'}
+                      size="sm"
+                      className="h-7 text-xs"
+                      onClick={() =>
+                        setFormTagIds((prev) =>
+                          prev.includes(tag.id) ? prev.filter((t) => t !== tag.id) : [...prev, tag.id]
+                        )
+                      }
+                    >
+                      <Tag className="h-3 w-3 mr-1" />
+                      {tag.name}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <Label>Penerima ({formSelectedContacts.length} dipilih)</Label>
+                <Label>Penerima Manual ({formSelectedContacts.length} dipilih)</Label>
                 <div className="flex gap-2">
                   <Button type="button" variant="outline" size="sm" onClick={selectAllFiltered}>
                     Pilih Semua
@@ -349,7 +441,7 @@ export default function BroadcastsPage() {
 
             <Button
               className="w-full"
-              disabled={!formName || !formInstanceId || !formMessage || formSelectedContacts.length === 0 || createMutation.isPending || formMediaUploading}
+              disabled={!formName || !formInstanceId || !formMessage || (formSelectedContacts.length === 0 && formTagIds.length === 0) || createMutation.isPending || formMediaUploading}
               onClick={() => createMutation.mutate()}
             >
               {(createMutation.isPending || formMediaUploading) ? (
@@ -357,7 +449,7 @@ export default function BroadcastsPage() {
               ) : (
                 <Plus className="h-4 w-4 mr-2" />
               )}
-              {formMediaUploading ? 'Mengupload media...' : `Buat Broadcast (${formSelectedContacts.length} penerima)`}
+              {formMediaUploading ? 'Mengupload media...' : `Buat Broadcast (${formSelectedContacts.length} kontak${formTagIds.length > 0 ? ` + ${formTagIds.length} tag` : ''})`}
             </Button>
           </div>
         </DialogContent>
@@ -499,8 +591,24 @@ export default function BroadcastsPage() {
                               size="icon"
                               className="h-7 w-7 text-red-600"
                               onClick={() => cancelMutation.mutate(bc.id)}
+                              title="Batalkan"
                             >
                               <XCircle className="h-3.5 w-3.5" />
+                            </Button>
+                          )}
+                          {bc.status !== 'SENDING' && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 text-red-600"
+                              onClick={() => {
+                                if (confirm('Hapus broadcast ini? Tindakan ini tidak bisa dibatalkan.')) {
+                                  deleteMutation.mutate(bc.id);
+                                }
+                              }}
+                              title="Hapus"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
                             </Button>
                           )}
                         </div>

@@ -11,6 +11,7 @@ router.use(authenticate, tenantGuard);
 router.get('/users', teamController.listUsers);
 router.post('/users/invite', authorize('OWNER', 'ADMIN'), teamController.inviteUser);
 router.patch('/users/:userId', authorize('OWNER', 'ADMIN'), teamController.updateUser);
+router.post('/users/:userId/reset-password', authorize('OWNER', 'ADMIN'), teamController.resetPassword);
 
 // Teams
 router.get('/', teamController.listTeams);

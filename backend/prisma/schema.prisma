@@ -43,6 +43,8 @@ model Organization {
   webhook_configs WebhookConfig[]
   deals          Deal[]
   activity_logs  ActivityLog[]
+  scheduled_messages ScheduledMessage[]
+  auto_responses     AutoResponse[]
 
   @@map("organizations")
 }
@@ -74,6 +76,8 @@ model User {
   is_online   Boolean  @default(false)
   last_seen_at DateTime?
   email_verified_at DateTime?
+  invite_token           String?  @unique
+  invite_token_expires_at DateTime?
 
   preferences         Json?
   notification_settings Json?
@@ -93,6 +97,7 @@ model User {
   assigned_deals       Deal[]          @relation("DealAssignedTo")
   created_broadcasts   Broadcast[]     @relation("BroadcastCreatedBy")
   created_templates    MessageTemplate[] @relation("TemplateCreatedBy")
+  created_scheduled_messages ScheduledMessage[] @relation("ScheduledMessageCreatedBy")
 
   @@unique([organization_id, email])
   @@map("users")
@@ -202,6 +207,7 @@ model WAInstance {
   conversations Conversation[]
   messages      Message[]
   broadcasts    Broadcast[]
+  scheduled_messages ScheduledMessage[]
 
   @@unique([organization_id, wa_instance_id])
   @@map("wa_instances")
@@ -255,6 +261,7 @@ model Contact {
   contact_tags  ContactTag[]
   conversations Conversation[]
   broadcast_recipients BroadcastRecipient[]
+  scheduled_message_recipients ScheduledMessageRecipient[]
   deals         Deal[]
 
   @@unique([organization_id, phone_number])
@@ -422,6 +429,8 @@ model Message {
   is_from_broadcast Boolean @default(false)
   broadcast_id      String?
   is_internal_note  Boolean @default(false)
+  is_edited         Boolean  @default(false)
+  edited_at         DateTime?
 
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
@@ -455,6 +464,7 @@ enum MessageStatus {
   READ
   FAILED
   RECEIVED
+  DELETED
 }
 
 // ============================================
@@ -525,6 +535,7 @@ model MessageTemplate {
   updated_at DateTime @updatedAt
 
   broadcasts Broadcast[]
+  auto_responses AutoResponse[]
 
   @@unique([organization_id, name])
   @@map("message_templates")
@@ -805,6 +816,93 @@ model ActivityLog {
 }
 
 // ============================================
+// SCHEDULED MESSAGE (Recurring Reminders)
+// ============================================
+
+model ScheduledMessage {
+  id              String @id @default(uuid())
+  organization_id String
+  organization    Organization @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  instance_id     String
+  instance        WAInstance @relation(fields: [instance_id], references: [id])
+
+  name            String
+  message_content String @db.Text
+  media_url       String?
+  media_type      MessageType?
+
+  // Cron expression for scheduling (e.g. "30 4 * * *" = every day 04:30)
+  cron_expression String
+  timezone        String @default("Asia/Jakarta")
+
+  // Conditional skip: JSON array of days to skip (0=Sun,1=Mon,...6=Sat)
+  // e.g. [5,6] = skip Friday & Saturday
+  skip_days       Json?
+
+  // Auto-add recipients by tag IDs (JSON array of tag UUIDs)
+  // At execution time, all contacts with these tags are included
+  recipient_tag_ids Json?
+
+  // Delay between messages to avoid WA rate limit
+  delay_min_seconds Int @default(3)
+  delay_max_seconds Int @default(10)
+
+  is_active       Boolean @default(true)
+  bullmq_job_key  String?
+
+  // Stats
+  total_sent       Int @default(0)
+  total_failed     Int @default(0)
+  last_executed_at DateTime?
+  next_execution_at DateTime?
+
+  created_by_id String?
+  created_by    User? @relation("ScheduledMessageCreatedBy", fields: [created_by_id], references: [id])
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  recipients ScheduledMessageRecipient[]
+  logs       ScheduledMessageLog[]
+
+  @@index([organization_id, is_active])
+  @@map("scheduled_messages")
+}
+
+model ScheduledMessageRecipient {
+  id                   String @id @default(uuid())
+  scheduled_message_id String
+  scheduled_message    ScheduledMessage @relation(fields: [scheduled_message_id], references: [id], onDelete: Cascade)
+  contact_id           String
+  contact              Contact @relation(fields: [contact_id], references: [id])
+
+  phone_number String
+  is_active    Boolean @default(true)
+
+  added_at DateTime @default(now())
+
+  @@unique([scheduled_message_id, contact_id])
+  @@map("scheduled_message_recipients")
+}
+
+model ScheduledMessageLog {
+  id                   String @id @default(uuid())
+  scheduled_message_id String
+  scheduled_message    ScheduledMessage @relation(fields: [scheduled_message_id], references: [id], onDelete: Cascade)
+
+  executed_at     DateTime @default(now())
+  total_targets   Int @default(0)
+  sent_count      Int @default(0)
+  failed_count    Int @default(0)
+  skipped_reason  String?
+
+  details Json?
+
+  @@index([scheduled_message_id, executed_at])
+  @@map("scheduled_message_logs")
+}
+
+// ============================================
 // WEBHOOK CONFIG
 // ============================================
 
@@ -813,18 +911,55 @@ model WebhookConfig {
   organization_id String
   organization    Organization @relation(fields: [organization_id], references: [id], onDelete: Cascade)
 
-  wa_instance_id  String
+  name            String
   webhook_url     String
   webhook_secret  String?
   events          Json?
+  wa_instance_id  String?
 
   is_active        Boolean   @default(true)
-  last_received_at DateTime?
+  last_triggered_at DateTime?
   failure_count    Int       @default(0)
 
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
 
-  @@unique([organization_id, wa_instance_id])
+  @@index([organization_id])
   @@map("webhook_configs")
+}
+
+// ============================================
+// AUTO RESPONSE
+// ============================================
+
+enum AutoResponseTrigger {
+  NEW_CHAT
+  OUTSIDE_HOURS
+}
+
+model AutoResponse {
+  id              String @id @default(uuid())
+  organization_id String
+  organization    Organization @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+
+  trigger      AutoResponseTrigger
+  template_id  String
+  template     MessageTemplate @relation(fields: [template_id], references: [id])
+
+  // Business hours config (for OUTSIDE_HOURS trigger)
+  business_hour_start String?  // e.g. "08:00"
+  business_hour_end   String?  // e.g. "17:00"
+  business_days       Json?    // e.g. [1,2,3,4,5] (Mon-Fri)
+  timezone            String   @default("Asia/Jakarta")
+
+  // Cooldown: don't send the same auto-response to the same contact within N minutes
+  cooldown_minutes Int @default(60)
+
+  is_active Boolean @default(true)
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@unique([organization_id, trigger])
+  @@map("auto_responses")
 }

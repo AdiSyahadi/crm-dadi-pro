@@ -13,5 +13,6 @@ router.post('/', authorize('OWNER', 'ADMIN', 'SUPERVISOR'), templateController.c
 router.patch('/:id', authorize('OWNER', 'ADMIN', 'SUPERVISOR'), templateController.update);
 router.delete('/:id', authorize('OWNER', 'ADMIN'), templateController.delete);
 router.post('/:id/toggle', authorize('OWNER', 'ADMIN', 'SUPERVISOR'), templateController.toggleActive);
+router.post('/:id/use', templateController.use);
 
 export default router;

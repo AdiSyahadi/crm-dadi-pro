@@ -13,6 +13,14 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
+import {
   User,
   Building2,
   Bell,
@@ -26,12 +34,30 @@ import {
   Wifi,
   Key,
   Globe,
+  Lock,
+  Zap,
+  Bot,
+  Clock,
+  UserPlus,
+  Trash2,
 } from 'lucide-react';
+import { WebhookSettings } from '@/components/settings/webhook-settings';
 import { toast } from 'sonner';
 
 export default function SettingsPage() {
   const user = useAuthStore((s) => s.user);
+  const logout = useAuthStore((s) => s.logout);
   const queryClient = useQueryClient();
+  const [pwForm, setPwForm] = useState({ oldPassword: '', newPassword: '', confirmPassword: '' });
+
+  // Auto-response state
+  const [arNewChatTemplateId, setArNewChatTemplateId] = useState('');
+  const [arNewChatCooldown, setArNewChatCooldown] = useState(60);
+  const [arOutsideTemplateId, setArOutsideTemplateId] = useState('');
+  const [arOutsideCooldown, setArOutsideCooldown] = useState(60);
+  const [arOutsideStart, setArOutsideStart] = useState('08:00');
+  const [arOutsideEnd, setArOutsideEnd] = useState('17:00');
+  const [arOutsideDays, setArOutsideDays] = useState<number[]>([1,2,3,4,5]);
 
   const initials = user?.name
     ?.split(' ')
@@ -113,6 +139,91 @@ export default function SettingsPage() {
     },
   });
 
+  const changePwMutation = useMutation({
+    mutationFn: async (input: { oldPassword: string; newPassword: string }) => {
+      await api.post('/auth/change-password', input);
+    },
+    onSuccess: () => {
+      toast.success('Password berhasil diubah. Silakan login ulang.');
+      setPwForm({ oldPassword: '', newPassword: '', confirmPassword: '' });
+      setTimeout(() => logout(), 1500);
+    },
+    onError: (err: any) => {
+      toast.error(err.response?.data?.error?.message || 'Gagal mengubah password');
+    },
+  });
+
+  // Auto-response queries
+  const { data: arRules = [], isLoading: arLoading } = useQuery({
+    queryKey: ['auto-responses'],
+    queryFn: async () => {
+      const { data } = await api.get('/auto-responses');
+      return data.data || [];
+    },
+  });
+
+  const { data: arTemplates = [] } = useQuery({
+    queryKey: ['templates-active'],
+    queryFn: async () => {
+      const { data } = await api.get('/templates?is_active=true&limit=50');
+      return (data.data || []) as { id: string; name: string; category: string | null; content: string }[];
+    },
+    staleTime: 60_000,
+  });
+
+  // Populate auto-response form from existing rules
+  useEffect(() => {
+    const newChat = arRules.find((r: any) => r.trigger === 'NEW_CHAT');
+    if (newChat) {
+      setArNewChatTemplateId(newChat.template_id);
+      setArNewChatCooldown(newChat.cooldown_minutes);
+    }
+    const outside = arRules.find((r: any) => r.trigger === 'OUTSIDE_HOURS');
+    if (outside) {
+      setArOutsideTemplateId(outside.template_id);
+      setArOutsideCooldown(outside.cooldown_minutes);
+      if (outside.business_hour_start) setArOutsideStart(outside.business_hour_start);
+      if (outside.business_hour_end) setArOutsideEnd(outside.business_hour_end);
+      if (Array.isArray(outside.business_days)) setArOutsideDays(outside.business_days);
+    }
+  }, [arRules]);
+
+  const arUpsertMutation = useMutation({
+    mutationFn: async (payload: any) => {
+      await api.put('/auto-responses', payload);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['auto-responses'] });
+      toast.success('Auto-response berhasil disimpan');
+    },
+    onError: (err: any) => toast.error(err.response?.data?.error?.message || 'Gagal menyimpan'),
+  });
+
+  const arToggleMutation = useMutation({
+    mutationFn: async ({ trigger, isActive }: { trigger: string; isActive: boolean }) => {
+      const rule = arRules.find((r: any) => r.trigger === trigger);
+      if (!rule) return;
+      await api.put('/auto-responses', { trigger, template_id: rule.template_id, is_active: isActive });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['auto-responses'] });
+    },
+    onError: (err: any) => toast.error(err.response?.data?.error?.message || 'Gagal mengubah status'),
+  });
+
+  const arDeleteMutation = useMutation({
+    mutationFn: async (trigger: string) => {
+      await api.delete(`/auto-responses/${trigger}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['auto-responses'] });
+      toast.success('Auto-response dihapus');
+    },
+    onError: (err: any) => toast.error(err.response?.data?.error?.message || 'Gagal menghapus'),
+  });
+
+  const AR_DAY_LABELS = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
+
   return (
     <div className="space-y-6 max-w-4xl">
       <div>
@@ -133,6 +244,14 @@ export default function SettingsPage() {
           <TabsTrigger value="organization">
             <Building2 className="h-4 w-4 mr-1.5" />
             Organisasi
+          </TabsTrigger>
+          <TabsTrigger value="webhooks">
+            <Zap className="h-4 w-4 mr-1.5" />
+            Webhook
+          </TabsTrigger>
+          <TabsTrigger value="auto-response">
+            <Bot className="h-4 w-4 mr-1.5" />
+            Auto-Response
           </TabsTrigger>
           <TabsTrigger value="notifications">
             <Bell className="h-4 w-4 mr-1.5" />
@@ -342,23 +461,64 @@ export default function SettingsPage() {
 
               <Separator />
 
-              <div>
-                <h3 className="text-sm font-semibold mb-3">Ubah Password</h3>
-                <div className="grid gap-4 sm:grid-cols-2">
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (pwForm.newPassword !== pwForm.confirmPassword) {
+                    toast.error('Konfirmasi password tidak cocok');
+                    return;
+                  }
+                  if (pwForm.newPassword.length < 8) {
+                    toast.error('Password baru minimal 8 karakter');
+                    return;
+                  }
+                  changePwMutation.mutate({ oldPassword: pwForm.oldPassword, newPassword: pwForm.newPassword });
+                }}
+              >
+                <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
+                  <Lock className="h-4 w-4" /> Ubah Password
+                </h3>
+                <div className="grid gap-4 sm:grid-cols-3">
+                  <div className="space-y-2">
+                    <Label>Password Lama</Label>
+                    <Input
+                      type="password"
+                      placeholder="••••••••"
+                      value={pwForm.oldPassword}
+                      onChange={(e) => setPwForm({ ...pwForm, oldPassword: e.target.value })}
+                      required
+                    />
+                  </div>
                   <div className="space-y-2">
                     <Label>Password Baru</Label>
-                    <Input type="password" placeholder="••••••••" />
+                    <Input
+                      type="password"
+                      placeholder="Minimal 8 karakter"
+                      value={pwForm.newPassword}
+                      onChange={(e) => setPwForm({ ...pwForm, newPassword: e.target.value })}
+                      required
+                      minLength={8}
+                    />
                   </div>
                   <div className="space-y-2">
                     <Label>Konfirmasi Password</Label>
-                    <Input type="password" placeholder="••••••••" />
+                    <Input
+                      type="password"
+                      placeholder="Ulangi password baru"
+                      value={pwForm.confirmPassword}
+                      onChange={(e) => setPwForm({ ...pwForm, confirmPassword: e.target.value })}
+                      required
+                      minLength={8}
+                    />
                   </div>
                 </div>
-              </div>
-
-              <div className="flex justify-end">
-                <Button>Simpan Perubahan</Button>
-              </div>
+                <div className="flex justify-end mt-4">
+                  <Button type="submit" disabled={changePwMutation.isPending}>
+                    {changePwMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                    Ubah Password
+                  </Button>
+                </div>
+              </form>
             </CardContent>
           </Card>
         </TabsContent>
@@ -401,6 +561,141 @@ export default function SettingsPage() {
               <div className="flex justify-end">
                 <Button>Simpan Perubahan</Button>
               </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Webhook Tab */}
+        <TabsContent value="webhooks" className="space-y-4">
+          <WebhookSettings />
+        </TabsContent>
+
+        {/* Auto-Response Tab */}
+        <TabsContent value="auto-response" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2">
+                <UserPlus className="h-5 w-5 text-primary" />
+                Greeting — Kontak Baru
+              </CardTitle>
+              <CardDescription>
+                Kirim pesan otomatis saat kontak baru pertama kali mengirim pesan.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {(() => {
+                const rule = arRules.find((r: any) => r.trigger === 'NEW_CHAT');
+                return (
+                  <>
+                    {rule && (
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                          <span className="text-sm font-medium">Aktif</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Switch checked={rule.is_active} onCheckedChange={(v) => arToggleMutation.mutate({ trigger: 'NEW_CHAT', isActive: v })} />
+                          <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => { if (confirm('Hapus auto-response ini?')) arDeleteMutation.mutate('NEW_CHAT'); }}>
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                    <div className="space-y-2">
+                      <Label>Template Pesan</Label>
+                      <Select value={arNewChatTemplateId} onValueChange={setArNewChatTemplateId}>
+                        <SelectTrigger><SelectValue placeholder="Pilih template..." /></SelectTrigger>
+                        <SelectContent>
+                          {arTemplates.map((t: any) => (
+                            <SelectItem key={t.id} value={t.id}>{t.name}{t.category ? ` (${t.category})` : ''}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Cooldown (menit)</Label>
+                      <Input type="number" min={1} max={1440} value={arNewChatCooldown} onChange={(e) => setArNewChatCooldown(parseInt(e.target.value) || 60)} />
+                      <p className="text-xs text-muted-foreground">Jeda minimum sebelum mengirim ulang ke kontak yang sama.</p>
+                    </div>
+                    <Button disabled={!arNewChatTemplateId || arUpsertMutation.isPending} onClick={() => arUpsertMutation.mutate({ trigger: 'NEW_CHAT', template_id: arNewChatTemplateId, cooldown_minutes: arNewChatCooldown })}>
+                      {arUpsertMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                      {rule ? 'Perbarui' : 'Simpan'}
+                    </Button>
+                  </>
+                );
+              })()}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2">
+                <Clock className="h-5 w-5 text-primary" />
+                Di Luar Jam Kerja
+              </CardTitle>
+              <CardDescription>
+                Kirim pesan otomatis saat pesan masuk di luar jam kerja.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {(() => {
+                const rule = arRules.find((r: any) => r.trigger === 'OUTSIDE_HOURS');
+                return (
+                  <>
+                    {rule && (
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                          <span className="text-sm font-medium">Aktif</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Switch checked={rule.is_active} onCheckedChange={(v) => arToggleMutation.mutate({ trigger: 'OUTSIDE_HOURS', isActive: v })} />
+                          <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => { if (confirm('Hapus auto-response ini?')) arDeleteMutation.mutate('OUTSIDE_HOURS'); }}>
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                    <div className="space-y-2">
+                      <Label>Template Pesan</Label>
+                      <Select value={arOutsideTemplateId} onValueChange={setArOutsideTemplateId}>
+                        <SelectTrigger><SelectValue placeholder="Pilih template..." /></SelectTrigger>
+                        <SelectContent>
+                          {arTemplates.map((t: any) => (
+                            <SelectItem key={t.id} value={t.id}>{t.name}{t.category ? ` (${t.category})` : ''}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-2">
+                        <Label>Jam Mulai Kerja</Label>
+                        <Input type="time" value={arOutsideStart} onChange={(e) => setArOutsideStart(e.target.value)} />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Jam Selesai Kerja</Label>
+                        <Input type="time" value={arOutsideEnd} onChange={(e) => setArOutsideEnd(e.target.value)} />
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Hari Kerja</Label>
+                      <div className="flex gap-1">
+                        {AR_DAY_LABELS.map((d, i) => (
+                          <button key={i} type="button" className={`px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors ${arOutsideDays.includes(i) ? 'bg-primary text-primary-foreground border-primary' : 'bg-muted/50 text-muted-foreground hover:bg-muted'}`} onClick={() => setArOutsideDays((p) => p.includes(i) ? p.filter((x) => x !== i) : [...p, i].sort())}>{d}</button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Cooldown (menit)</Label>
+                      <Input type="number" min={1} max={1440} value={arOutsideCooldown} onChange={(e) => setArOutsideCooldown(parseInt(e.target.value) || 60)} />
+                    </div>
+                    <Button disabled={!arOutsideTemplateId || arUpsertMutation.isPending} onClick={() => arUpsertMutation.mutate({ trigger: 'OUTSIDE_HOURS', template_id: arOutsideTemplateId, business_hour_start: arOutsideStart, business_hour_end: arOutsideEnd, business_days: arOutsideDays, cooldown_minutes: arOutsideCooldown })}>
+                      {arUpsertMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                      {rule ? 'Perbarui' : 'Simpan'}
+                    </Button>
+                  </>
+                );
+              })()}
             </CardContent>
           </Card>
         </TabsContent>

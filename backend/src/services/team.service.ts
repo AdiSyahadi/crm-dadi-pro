@@ -122,22 +122,52 @@ export class TeamService {
     });
   }
 
-  async inviteUser(organizationId: string, data: { email: string; name: string; role: string; password: string }) {
+  async inviteUser(organizationId: string, data: { email: string; name: string; role: string; password?: string }) {
     const existing = await prisma.user.findFirst({
       where: { organization_id: organizationId, email: data.email },
     });
     if (existing) throw AppError.conflict('User with this email already exists in this organization');
 
+    const crypto = await import('crypto');
     const bcrypt = await import('bcryptjs');
-    const passwordHash = await bcrypt.hash(data.password, 12);
+
+    // If password provided (legacy flow), create active user directly
+    if (data.password && data.password.length >= 8) {
+      const passwordHash = await bcrypt.hash(data.password, 12);
+      return prisma.user.create({
+        data: {
+          organization_id: organizationId,
+          email: data.email,
+          name: data.name,
+          password_hash: passwordHash,
+          role: data.role as any,
+        },
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          role: true,
+          created_at: true,
+          invite_token: true,
+        },
+      });
+    }
+
+    // Token-based invite: create inactive user with invite token
+    const inviteToken = crypto.randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000); // 48 hours
+    const placeholderHash = await bcrypt.hash(crypto.randomBytes(20).toString('hex'), 4);
 
     return prisma.user.create({
       data: {
         organization_id: organizationId,
         email: data.email,
         name: data.name,
-        password_hash: passwordHash,
+        password_hash: placeholderHash,
         role: data.role as any,
+        is_active: false,
+        invite_token: inviteToken,
+        invite_token_expires_at: expiresAt,
       },
       select: {
         id: true,
@@ -145,15 +175,31 @@ export class TeamService {
         email: true,
         role: true,
         created_at: true,
+        invite_token: true,
       },
     });
   }
 
-  async updateUser(organizationId: string, userId: string, data: { name?: string; role?: string; is_active?: boolean }) {
+  async updateUser(organizationId: string, userId: string, data: { name?: string; role?: string; is_active?: boolean }, callerId?: string) {
     const user = await prisma.user.findFirst({
       where: { id: userId, organization_id: organizationId },
     });
     if (!user) throw AppError.notFound('User not found');
+
+    // Safety: cannot deactivate yourself
+    if (data.is_active === false && callerId === userId) {
+      throw AppError.badRequest('Tidak bisa menonaktifkan akun sendiri');
+    }
+
+    // Safety: cannot change OWNER role
+    if (user.role === 'OWNER' && data.role && data.role !== 'OWNER') {
+      throw AppError.badRequest('Tidak bisa mengubah role OWNER');
+    }
+
+    // Safety: cannot deactivate OWNER
+    if (user.role === 'OWNER' && data.is_active === false) {
+      throw AppError.badRequest('Tidak bisa menonaktifkan akun OWNER');
+    }
 
     const updateData: any = {};
     if (data.name !== undefined) updateData.name = data.name;
@@ -164,6 +210,26 @@ export class TeamService {
       where: { id: userId },
       data: updateData,
       select: { id: true, name: true, email: true, role: true, is_active: true },
+    });
+  }
+  async resetPassword(organizationId: string, userId: string, newPassword: string) {
+    const user = await prisma.user.findFirst({
+      where: { id: userId, organization_id: organizationId },
+    });
+    if (!user) throw AppError.notFound('User not found');
+
+    if (user.role === 'OWNER') throw AppError.badRequest('Tidak bisa reset password OWNER dari sini');
+
+    if (newPassword.length < 8) throw AppError.badRequest('Password minimal 8 karakter');
+
+    const bcrypt = await import('bcryptjs');
+    const hash = await bcrypt.hash(newPassword, 12);
+    await prisma.user.update({ where: { id: userId }, data: { password_hash: hash } });
+
+    // Revoke all refresh tokens
+    await prisma.refreshToken.updateMany({
+      where: { user_id: userId, revoked_at: null },
+      data: { revoked_at: new Date() },
     });
   }
 }

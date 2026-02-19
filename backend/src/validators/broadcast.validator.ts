@@ -10,7 +10,8 @@ export const createBroadcastSchema = z.object({
   scheduled_at: z.string().datetime().optional(),
   delay_min_seconds: z.number().min(3).max(60).default(5),
   delay_max_seconds: z.number().min(5).max(120).default(15),
-  recipient_contact_ids: z.array(z.string().uuid()).min(1),
+  recipient_contact_ids: z.array(z.string().uuid()).optional().default([]),
+  recipient_tag_ids: z.array(z.string().uuid()).optional(),
 });
 
 export const listBroadcastsSchema = z.object({

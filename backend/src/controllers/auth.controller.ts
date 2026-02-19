@@ -48,6 +48,27 @@ export class AuthController {
     }
   }
 
+  async acceptInvite(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const { token, password } = req.body;
+      const ipAddress = req.ip || req.socket.remoteAddress;
+      const result = await authService.acceptInvite(token, password, ipAddress);
+      sendSuccess(res, result, 'Akun berhasil diaktifkan');
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async changePassword(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const { oldPassword, newPassword } = req.body;
+      await authService.changePassword(req.user!.userId, oldPassword, newPassword);
+      sendSuccess(res, null, 'Password berhasil diubah');
+    } catch (error) {
+      next(error);
+    }
+  }
+
   async getProfile(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const userId = req.user!.userId;

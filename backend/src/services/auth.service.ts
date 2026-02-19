@@ -254,6 +254,88 @@ export class AuthService {
     });
   }
 
+  async acceptInvite(token: string, password: string, ipAddress?: string) {
+    if (!token) throw AppError.badRequest('Token undangan diperlukan');
+    if (!password || password.length < 8) throw AppError.badRequest('Password minimal 8 karakter');
+
+    const user = await prisma.user.findFirst({
+      where: { invite_token: token },
+      include: { organization: true },
+    });
+
+    if (!user) throw AppError.notFound('Token undangan tidak valid');
+    if (user.invite_token_expires_at && user.invite_token_expires_at < new Date()) {
+      throw AppError.badRequest('Token undangan sudah kedaluwarsa');
+    }
+
+    const passwordHash = await bcrypt.hash(password, 12);
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        password_hash: passwordHash,
+        is_active: true,
+        invite_token: null,
+        invite_token_expires_at: null,
+        email_verified_at: new Date(),
+      },
+    });
+
+    // Generate login tokens
+    const jwtPayload: JwtPayload = {
+      userId: user.id,
+      organizationId: user.organization_id,
+      role: user.role,
+    };
+
+    const accessToken = generateAccessToken(jwtPayload);
+    const refreshToken = generateRefreshToken();
+
+    await prisma.refreshToken.create({
+      data: {
+        user_id: user.id,
+        token_hash: hashToken(refreshToken),
+        ip_address: ipAddress,
+        expires_at: getRefreshExpiresAt(),
+      },
+    });
+
+    return {
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        role: user.role,
+      },
+      organization: {
+        id: user.organization.id,
+        name: user.organization.name,
+        slug: user.organization.slug,
+      },
+      accessToken,
+      refreshToken,
+    };
+  }
+
+  async changePassword(userId: string, oldPassword: string, newPassword: string) {
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw AppError.notFound('User not found');
+
+    const isValid = await bcrypt.compare(oldPassword, user.password_hash);
+    if (!isValid) throw AppError.badRequest('Password lama salah');
+
+    if (newPassword.length < 8) throw AppError.badRequest('Password baru minimal 8 karakter');
+
+    const newHash = await bcrypt.hash(newPassword, 12);
+    await prisma.user.update({ where: { id: userId }, data: { password_hash: newHash } });
+
+    // Revoke all refresh tokens so user must re-login
+    await prisma.refreshToken.updateMany({
+      where: { user_id: userId, revoked_at: null },
+      data: { revoked_at: new Date() },
+    });
+  }
+
   async getProfile(userId: string) {
     const user = await prisma.user.findUnique({
       where: { id: userId },

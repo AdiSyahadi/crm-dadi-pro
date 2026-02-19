@@ -1,6 +1,7 @@
 import { prisma } from '../config/database';
 import { AppError } from '../utils/app-error';
 import { CreateDealInput, UpdateDealInput, ListDealsInput, DealReportInput } from '../validators/deal.validator';
+import { dispatchWebhookEvent } from './webhook-dispatcher.service';
 
 async function generateDealNumber(organizationId: string): Promise<string> {
   const year = new Date().getFullYear();
@@ -144,7 +145,9 @@ export class DealService {
       },
     });
 
-    return this.getById(organizationId, deal.id);
+    const fullDeal = await this.getById(organizationId, deal.id);
+    dispatchWebhookEvent(organizationId, 'deal.created', { deal: fullDeal });
+    return fullDeal;
   }
 
   async update(organizationId: string, userId: string, dealId: string, input: UpdateDealInput) {
@@ -212,7 +215,9 @@ export class DealService {
       },
     });
 
-    return this.getById(organizationId, dealId);
+    const movedDeal = await this.getById(organizationId, dealId);
+    dispatchWebhookEvent(organizationId, 'deal.stage_changed', { deal: movedDeal, old_stage: oldStage, new_stage: newStage });
+    return movedDeal;
   }
 
   async markWon(organizationId: string, userId: string, dealId: string, wonNotes?: string, actualCloseDate?: string) {
@@ -239,7 +244,9 @@ export class DealService {
       },
     });
 
-    return this.getById(organizationId, dealId);
+    const wonDeal = await this.getById(organizationId, dealId);
+    dispatchWebhookEvent(organizationId, 'deal.won', { deal: wonDeal });
+    return wonDeal;
   }
 
   async markLost(organizationId: string, userId: string, dealId: string, lostReason: string, actualCloseDate?: string) {
@@ -266,7 +273,9 @@ export class DealService {
       },
     });
 
-    return this.getById(organizationId, dealId);
+    const lostDeal = await this.getById(organizationId, dealId);
+    dispatchWebhookEvent(organizationId, 'deal.lost', { deal: lostDeal, lost_reason: lostReason });
+    return lostDeal;
   }
 
   async reopen(organizationId: string, userId: string, dealId: string) {

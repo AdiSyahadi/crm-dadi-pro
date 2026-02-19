@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '@/lib/api';
 import { Button } from '@/components/ui/button';
@@ -21,7 +21,6 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from '@/components/ui/dialog';
 import {
   Select,
@@ -30,10 +29,30 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Separator } from '@/components/ui/separator';
 import { Card, CardContent } from '@/components/ui/card';
-import { Search, Plus, Users, Phone, Mail, Building2, Loader2, Trash2, Edit } from 'lucide-react';
+import { Search, Plus, Users, Phone, Building2, Loader2, Trash2, Edit, Tag, X, Tags, Upload, Download, FileSpreadsheet, AlertCircle, CheckCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
+
+const LABEL_COLORS = [
+  { name: 'Biru', value: '#3b82f6' },
+  { name: 'Hijau', value: '#22c55e' },
+  { name: 'Merah', value: '#ef4444' },
+  { name: 'Kuning', value: '#eab308' },
+  { name: 'Ungu', value: '#a855f7' },
+  { name: 'Pink', value: '#ec4899' },
+  { name: 'Oranye', value: '#f97316' },
+  { name: 'Teal', value: '#14b8a6' },
+];
+
+interface TagItem {
+  id: string;
+  name: string;
+  color: string | null;
+  description: string | null;
+  _count: { contact_tags: number };
+}
 
 interface Contact {
   id: string;
@@ -43,55 +62,330 @@ interface Contact {
   company: string | null;
   source: string;
   stage: string;
-  tags: { tag: { id: string; name: string; color: string } }[];
+  tags: { id: string; name: string; color: string }[];
   total_messages: number;
   created_at: string;
 }
 
 export default function ContactsPage() {
   const queryClient = useQueryClient();
-  const [search, setSearch] = useState('');
-  const [page, setPage] = useState(1);
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [form, setForm] = useState({ name: '', phone_number: '', email: '', company: '', source: 'MANUAL' });
+  const [activeTab, setActiveTab] = useState<'contacts' | 'labels'>('contacts');
 
+  // Contact state
+  const [search, setSearch] = useState('');
+  const [filterTag, setFilterTag] = useState('');
+  const [page, setPage] = useState(1);
+  const [contactDialogOpen, setContactDialogOpen] = useState(false);
+  const [editingContactId, setEditingContactId] = useState<string | null>(null);
+  const [contactForm, setContactForm] = useState({ name: '', phone_number: '', email: '', company: '', source: 'MANUAL', tags: [] as string[] });
+
+  // Label state
+  const [labelDialogOpen, setLabelDialogOpen] = useState(false);
+  const [editingLabelId, setEditingLabelId] = useState<string | null>(null);
+  const [labelForm, setLabelForm] = useState({ name: '', color: '#3b82f6', description: '' });
+
+  // Bulk select state
+  const [selectedContacts, setSelectedContacts] = useState<string[]>([]);
+  const [bulkLabelDialogOpen, setBulkLabelDialogOpen] = useState(false);
+  const [bulkTags, setBulkTags] = useState<string[]>([]);
+
+  // Import state
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [importData, setImportData] = useState<Array<{ phone_number: string; name?: string; email?: string; company?: string }>>([]);
+  const [importTags, setImportTags] = useState<string[]>([]);
+  const [importFileName, setImportFileName] = useState('');
+  const [importError, setImportError] = useState('');
+  const csvInputRef = useRef<HTMLInputElement>(null);
+
+  // Queries
   const { data, isLoading } = useQuery({
-    queryKey: ['contacts', search, page],
+    queryKey: ['contacts', search, page, filterTag],
     queryFn: async () => {
       const params = new URLSearchParams({ page: String(page), limit: '20' });
       if (search) params.set('search', search);
+      if (filterTag) params.set('tag', filterTag);
       const { data } = await api.get(`/contacts?${params}`);
       return data;
     },
   });
-
   const contacts: Contact[] = data?.data || [];
   const meta = data?.meta;
 
-  const createMutation = useMutation({
-    mutationFn: async (input: typeof form) => {
+  const { data: tags = [] } = useQuery({
+    queryKey: ['tags'],
+    queryFn: async () => {
+      const { data } = await api.get('/contacts/tags');
+      return (data.data || []) as TagItem[];
+    },
+  });
+
+  // Contact mutations
+  const createContactMutation = useMutation({
+    mutationFn: async (input: typeof contactForm) => {
       await api.post('/contacts', input);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['contacts'] });
-      setDialogOpen(false);
-      setForm({ name: '', phone_number: '', email: '', company: '', source: 'MANUAL' });
+      queryClient.invalidateQueries({ queryKey: ['tags'] });
+      setContactDialogOpen(false);
+      resetContactForm();
       toast.success('Kontak berhasil ditambahkan');
     },
-    onError: (err: any) => {
-      toast.error(err.response?.data?.error?.message || 'Gagal menambahkan kontak');
-    },
+    onError: (err: any) => toast.error(err.response?.data?.error?.message || 'Gagal menambahkan kontak'),
   });
 
-  const deleteMutation = useMutation({
-    mutationFn: async (id: string) => {
-      await api.delete(`/contacts/${id}`);
+  const updateContactMutation = useMutation({
+    mutationFn: async ({ id, input }: { id: string; input: any }) => {
+      await api.patch(`/contacts/${id}`, input);
     },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['contacts'] });
+      queryClient.invalidateQueries({ queryKey: ['tags'] });
+      setContactDialogOpen(false);
+      resetContactForm();
+      toast.success('Kontak berhasil diperbarui');
+    },
+    onError: (err: any) => toast.error(err.response?.data?.error?.message || 'Gagal memperbarui kontak'),
+  });
+
+  const deleteContactMutation = useMutation({
+    mutationFn: async (id: string) => { await api.delete(`/contacts/${id}`); },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['contacts'] });
       toast.success('Kontak dihapus');
     },
   });
+
+  // Label mutations
+  const createLabelMutation = useMutation({
+    mutationFn: async (input: typeof labelForm) => {
+      await api.post('/contacts/tags', input);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tags'] });
+      setLabelDialogOpen(false);
+      resetLabelForm();
+      toast.success('Label berhasil dibuat');
+    },
+    onError: (err: any) => toast.error(err.response?.data?.error?.message || 'Gagal membuat label'),
+  });
+
+  const updateLabelMutation = useMutation({
+    mutationFn: async ({ id, input }: { id: string; input: any }) => {
+      await api.patch(`/contacts/tags/${id}`, input);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tags'] });
+      queryClient.invalidateQueries({ queryKey: ['contacts'] });
+      setLabelDialogOpen(false);
+      resetLabelForm();
+      toast.success('Label berhasil diperbarui');
+    },
+    onError: (err: any) => toast.error(err.response?.data?.error?.message || 'Gagal memperbarui label'),
+  });
+
+  const deleteLabelMutation = useMutation({
+    mutationFn: async (id: string) => { await api.delete(`/contacts/tags/${id}`); },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tags'] });
+      queryClient.invalidateQueries({ queryKey: ['contacts'] });
+      toast.success('Label dihapus');
+    },
+    onError: (err: any) => toast.error(err.response?.data?.error?.message || 'Gagal menghapus label'),
+  });
+
+  // Bulk assign mutation
+  const bulkAssignMutation = useMutation({
+    mutationFn: async (payload: { contact_ids: string[]; tags: string[] }) => {
+      const { data } = await api.post('/contacts/bulk-assign-tags', payload);
+      return data.data;
+    },
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ['contacts'] });
+      queryClient.invalidateQueries({ queryKey: ['tags'] });
+      setBulkLabelDialogOpen(false);
+      setSelectedContacts([]);
+      setBulkTags([]);
+      toast.success(`Label berhasil di-assign ke ${result.assigned} kontak`);
+    },
+    onError: (err: any) => toast.error(err.response?.data?.error?.message || 'Gagal assign label'),
+  });
+
+  // Import mutation
+  const importMutation = useMutation({
+    mutationFn: async (payload: { contacts: Array<{ phone_number: string; name?: string; email?: string; company?: string; tags?: string[] }> }) => {
+      const { data } = await api.post('/contacts/import', payload);
+      return data.data;
+    },
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ['contacts'] });
+      queryClient.invalidateQueries({ queryKey: ['tags'] });
+      setImportDialogOpen(false);
+      resetImport();
+      toast.success(`Import selesai: ${result.created} ditambahkan, ${result.skipped} dilewati`);
+    },
+    onError: (err: any) => toast.error(err.response?.data?.error?.message || 'Gagal import kontak'),
+  });
+
+  // Helpers
+  const resetContactForm = () => {
+    setContactForm({ name: '', phone_number: '', email: '', company: '', source: 'MANUAL', tags: [] });
+    setEditingContactId(null);
+  };
+
+  const resetLabelForm = () => {
+    setLabelForm({ name: '', color: '#3b82f6', description: '' });
+    setEditingLabelId(null);
+  };
+
+  const resetImport = () => {
+    setImportData([]);
+    setImportTags([]);
+    setImportFileName('');
+    setImportError('');
+    if (csvInputRef.current) csvInputRef.current.value = '';
+  };
+
+  const parseCSV = (text: string): Array<{ phone_number: string; name?: string; email?: string; company?: string }> => {
+    const lines = text.split(/\r?\n/).filter((l) => l.trim());
+    if (lines.length < 2) throw new Error('File CSV harus memiliki header dan minimal 1 baris data');
+
+    const headerRaw = lines[0].split(/[,;\t]/).map((h) => h.trim().toLowerCase().replace(/["']/g, ''));
+    const phoneIdx = headerRaw.findIndex((h) => ['phone', 'phone_number', 'telepon', 'nomor', 'no', 'whatsapp', 'wa', 'no_wa', 'no_telepon', 'nomer'].includes(h));
+    const nameIdx = headerRaw.findIndex((h) => ['name', 'nama'].includes(h));
+    const emailIdx = headerRaw.findIndex((h) => ['email', 'e-mail'].includes(h));
+    const companyIdx = headerRaw.findIndex((h) => ['company', 'perusahaan', 'instansi'].includes(h));
+
+    if (phoneIdx === -1) throw new Error('Kolom nomor telepon tidak ditemukan. Gunakan header: phone, telepon, nomor, wa, atau whatsapp');
+
+    const result: Array<{ phone_number: string; name?: string; email?: string; company?: string }> = [];
+    const delimiter = lines[0].includes('\t') ? '\t' : lines[0].includes(';') ? ';' : ',';
+
+    for (let i = 1; i < lines.length; i++) {
+      const cols = lines[i].split(delimiter).map((c) => c.trim().replace(/^"|"$/g, ''));
+      const phone = cols[phoneIdx]?.replace(/[^0-9+]/g, '');
+      if (!phone || phone.length < 10) continue;
+      result.push({
+        phone_number: phone,
+        ...(nameIdx >= 0 && cols[nameIdx] ? { name: cols[nameIdx] } : {}),
+        ...(emailIdx >= 0 && cols[emailIdx] ? { email: cols[emailIdx] } : {}),
+        ...(companyIdx >= 0 && cols[companyIdx] ? { company: cols[companyIdx] } : {}),
+      });
+    }
+    return result;
+  };
+
+  const handleCSVUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImportError('');
+    setImportFileName(file.name);
+
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const text = ev.target?.result as string;
+        const parsed = parseCSV(text);
+        if (parsed.length === 0) throw new Error('Tidak ada data valid ditemukan di file');
+        setImportData(parsed);
+      } catch (err: any) {
+        setImportError(err.message);
+        setImportData([]);
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const downloadTemplate = () => {
+    const csvContent = [
+      'nama,phone,email,perusahaan',
+      'Budi Santoso,6281234567890,budi@email.com,PT Maju Jaya',
+      'Siti Aminah,6289876543210,siti@email.com,CV Berkah',
+      'Ahmad Rizki,6285551234567,,',
+    ].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'template_import_kontak.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleImportSubmit = () => {
+    const contacts = importData.map((c) => ({
+      ...c,
+      tags: importTags.length > 0 ? importTags : undefined,
+    }));
+    importMutation.mutate({ contacts });
+  };
+
+  const toggleImportTag = (tagName: string) => {
+    setImportTags((prev) => prev.includes(tagName) ? prev.filter((t) => t !== tagName) : [...prev, tagName]);
+  };
+
+  const toggleSelectContact = (id: string) => {
+    setSelectedContacts((prev) => prev.includes(id) ? prev.filter((c) => c !== id) : [...prev, id]);
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedContacts.length === contacts.length) {
+      setSelectedContacts([]);
+    } else {
+      setSelectedContacts(contacts.map((c) => c.id));
+    }
+  };
+
+  const toggleBulkTag = (tagName: string) => {
+    setBulkTags((prev) => prev.includes(tagName) ? prev.filter((t) => t !== tagName) : [...prev, tagName]);
+  };
+
+  const handleBulkAssign = () => {
+    if (selectedContacts.length === 0 || bulkTags.length === 0) return;
+    bulkAssignMutation.mutate({ contact_ids: selectedContacts, tags: bulkTags });
+  };
+
+  const openEditContact = (c: Contact) => {
+    setEditingContactId(c.id);
+    setContactForm({
+      name: c.name,
+      phone_number: c.phone_number,
+      email: c.email || '',
+      company: c.company || '',
+      source: c.source,
+      tags: c.tags?.map((t) => t.name) || [],
+    });
+    setContactDialogOpen(true);
+  };
+
+  const openEditLabel = (t: TagItem) => {
+    setEditingLabelId(t.id);
+    setLabelForm({ name: t.name, color: t.color || '#3b82f6', description: t.description || '' });
+    setLabelDialogOpen(true);
+  };
+
+  const handleContactSubmit = () => {
+    if (editingContactId) {
+      updateContactMutation.mutate({ id: editingContactId, input: contactForm });
+    } else {
+      createContactMutation.mutate(contactForm);
+    }
+  };
+
+  const handleLabelSubmit = () => {
+    if (editingLabelId) {
+      updateLabelMutation.mutate({ id: editingLabelId, input: labelForm });
+    } else {
+      createLabelMutation.mutate(labelForm);
+    }
+  };
+
+  const toggleContactTag = (tagName: string) => {
+    setContactForm((prev) => ({
+      ...prev,
+      tags: prev.tags.includes(tagName) ? prev.tags.filter((t) => t !== tagName) : [...prev.tags, tagName],
+    }));
+  };
 
   const initials = (name: string) =>
     name?.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2) || '?';
@@ -107,236 +401,655 @@ export default function ContactsPage() {
 
   return (
     <div className="space-y-6">
+      {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold">Kontak</h1>
-          <p className="text-sm text-muted-foreground">Kelola semua kontak WhatsApp Anda</p>
+          <p className="text-sm text-muted-foreground">Kelola kontak dan label WhatsApp Anda</p>
         </div>
-        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-          <DialogTrigger asChild>
-            <Button>
-              <Plus className="h-4 w-4 mr-2" />
-              Tambah Kontak
-            </Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Tambah Kontak Baru</DialogTitle>
-            </DialogHeader>
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                createMutation.mutate(form);
-              }}
-              className="space-y-4"
-            >
-              <div className="space-y-2">
-                <Label>Nama</Label>
-                <Input
-                  placeholder="John Doe"
-                  value={form.name}
-                  onChange={(e) => setForm({ ...form, name: e.target.value })}
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Nomor WhatsApp</Label>
-                <Input
-                  placeholder="6281234567890"
-                  value={form.phone_number}
-                  onChange={(e) => setForm({ ...form, phone_number: e.target.value })}
-                  required
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-2">
-                  <Label>Email</Label>
-                  <Input
-                    type="email"
-                    placeholder="email@contoh.com"
-                    value={form.email}
-                    onChange={(e) => setForm({ ...form, email: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Perusahaan</Label>
-                  <Input
-                    placeholder="PT Contoh"
-                    value={form.company}
-                    onChange={(e) => setForm({ ...form, company: e.target.value })}
-                  />
-                </div>
-              </div>
-              <Button type="submit" className="w-full" disabled={createMutation.isPending}>
-                {createMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-                Simpan
+        <div className="flex gap-2">
+          {activeTab === 'contacts' && (
+            <>
+              <Button variant="outline" onClick={() => { resetImport(); setImportDialogOpen(true); }}>
+                <Upload className="h-4 w-4 mr-2" /> Import CSV
               </Button>
-            </form>
-          </DialogContent>
-        </Dialog>
+              <Button onClick={() => { resetContactForm(); setContactDialogOpen(true); }}>
+                <Plus className="h-4 w-4 mr-2" /> Tambah Kontak
+              </Button>
+            </>
+          )}
+          {activeTab === 'labels' && (
+            <Button onClick={() => { resetLabelForm(); setLabelDialogOpen(true); }}>
+              <Plus className="h-4 w-4 mr-2" /> Buat Label
+            </Button>
+          )}
+        </div>
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card>
-          <CardContent className="flex items-center gap-3 p-4">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-              <Users className="h-5 w-5 text-primary" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold">{meta?.total || 0}</p>
-              <p className="text-xs text-muted-foreground">Total Kontak</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="flex items-center gap-3 p-4">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-500/10">
-              <Phone className="h-5 w-5 text-blue-500" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold">{contacts.filter((c) => c.stage === 'LEAD').length}</p>
-              <p className="text-xs text-muted-foreground">Leads</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="flex items-center gap-3 p-4">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-purple-500/10">
-              <Mail className="h-5 w-5 text-purple-500" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold">{contacts.filter((c) => c.stage === 'PROSPECT').length}</p>
-              <p className="text-xs text-muted-foreground">Prospects</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="flex items-center gap-3 p-4">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-500/10">
-              <Building2 className="h-5 w-5 text-emerald-500" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold">{contacts.filter((c) => c.stage === 'CUSTOMER').length}</p>
-              <p className="text-xs text-muted-foreground">Customers</p>
-            </div>
-          </CardContent>
-        </Card>
+      {/* Tabs */}
+      <div className="flex gap-1 border-b">
+        <button
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            activeTab === 'contacts' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'
+          }`}
+          onClick={() => setActiveTab('contacts')}
+        >
+          <Users className="h-4 w-4 inline mr-1.5" />Kontak
+        </button>
+        <button
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            activeTab === 'labels' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'
+          }`}
+          onClick={() => setActiveTab('labels')}
+        >
+          <Tags className="h-4 w-4 inline mr-1.5" />Label ({tags.length})
+        </button>
       </div>
 
-      {/* Search */}
-      <div className="relative max-w-sm">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-        <Input
-          placeholder="Cari nama, telepon, email..."
-          className="pl-9"
-          value={search}
-          onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-        />
-      </div>
+      {/* ============ CONTACTS TAB ============ */}
+      {activeTab === 'contacts' && (
+        <>
+          {/* Stats */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <Card>
+              <CardContent className="flex items-center gap-3 p-4">
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
+                  <Users className="h-5 w-5 text-primary" />
+                </div>
+                <div>
+                  <p className="text-2xl font-bold">{meta?.total || 0}</p>
+                  <p className="text-xs text-muted-foreground">Total Kontak</p>
+                </div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="flex items-center gap-3 p-4">
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-500/10">
+                  <Phone className="h-5 w-5 text-blue-500" />
+                </div>
+                <div>
+                  <p className="text-2xl font-bold">{contacts.filter((c) => c.stage === 'LEAD').length}</p>
+                  <p className="text-xs text-muted-foreground">Leads</p>
+                </div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="flex items-center gap-3 p-4">
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-500/10">
+                  <Building2 className="h-5 w-5 text-emerald-500" />
+                </div>
+                <div>
+                  <p className="text-2xl font-bold">{contacts.filter((c) => c.stage === 'CUSTOMER').length}</p>
+                  <p className="text-xs text-muted-foreground">Customers</p>
+                </div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="flex items-center gap-3 p-4">
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-purple-500/10">
+                  <Tags className="h-5 w-5 text-purple-500" />
+                </div>
+                <div>
+                  <p className="text-2xl font-bold">{tags.length}</p>
+                  <p className="text-xs text-muted-foreground">Label</p>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
 
-      {/* Table */}
-      <Card>
-        <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Kontak</TableHead>
-                <TableHead className="hidden md:table-cell">Telepon</TableHead>
-                <TableHead className="hidden lg:table-cell">Perusahaan</TableHead>
-                <TableHead>Stage</TableHead>
-                <TableHead className="hidden md:table-cell">Sumber</TableHead>
-                <TableHead className="hidden lg:table-cell">Dibuat</TableHead>
-                <TableHead className="w-[80px]"></TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {isLoading ? (
-                <TableRow>
-                  <TableCell colSpan={7} className="text-center py-12">
-                    <Loader2 className="h-6 w-6 animate-spin mx-auto text-muted-foreground" />
-                  </TableCell>
-                </TableRow>
-              ) : contacts.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={7} className="text-center py-12 text-muted-foreground">
-                    Belum ada kontak
-                  </TableCell>
-                </TableRow>
-              ) : (
-                contacts.map((contact) => (
-                  <TableRow key={contact.id}>
-                    <TableCell>
+          {/* Search + Filter */}
+          <div className="flex flex-col sm:flex-row gap-3">
+            <div className="relative flex-1 max-w-sm">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Cari nama, telepon, email..."
+                className="pl-9"
+                value={search}
+                onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+              />
+            </div>
+            <Select value={filterTag} onValueChange={(v) => { setFilterTag(v === 'all' ? '' : v); setPage(1); }}>
+              <SelectTrigger className="w-48">
+                <SelectValue placeholder="Filter label" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Semua Label</SelectItem>
+                {tags.map((t) => (
+                  <SelectItem key={t.id} value={t.name}>
+                    <span className="flex items-center gap-2">
+                      <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: t.color || '#6b7280' }} />
+                      {t.name}
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Bulk action bar */}
+          {selectedContacts.length > 0 && (
+            <div className="flex items-center gap-3 bg-primary/5 border border-primary/20 rounded-lg px-4 py-2.5">
+              <span className="text-sm font-medium">{selectedContacts.length} kontak dipilih</span>
+              <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => { setBulkTags([]); setBulkLabelDialogOpen(true); }}>
+                <Tag className="h-3 w-3 mr-1" /> Assign Label
+              </Button>
+              <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setSelectedContacts([])}>
+                <X className="h-3 w-3 mr-1" /> Batal
+              </Button>
+            </div>
+          )}
+
+          {/* Table */}
+          <Card>
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-[40px]">
+                      <input
+                        type="checkbox"
+                        className="rounded border-gray-300"
+                        checked={contacts.length > 0 && selectedContacts.length === contacts.length}
+                        onChange={toggleSelectAll}
+                      />
+                    </TableHead>
+                    <TableHead>Kontak</TableHead>
+                    <TableHead className="hidden md:table-cell">Telepon</TableHead>
+                    <TableHead>Label</TableHead>
+                    <TableHead className="hidden lg:table-cell">Stage</TableHead>
+                    <TableHead className="hidden lg:table-cell">Dibuat</TableHead>
+                    <TableHead className="w-[80px]"></TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {isLoading ? (
+                    <TableRow>
+                      <TableCell colSpan={7} className="text-center py-12">
+                        <Loader2 className="h-6 w-6 animate-spin mx-auto text-muted-foreground" />
+                      </TableCell>
+                    </TableRow>
+                  ) : contacts.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={7} className="text-center py-12 text-muted-foreground">
+                        Belum ada kontak
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    contacts.map((contact) => (
+                      <TableRow key={contact.id} className={selectedContacts.includes(contact.id) ? 'bg-primary/5' : ''}>
+                        <TableCell>
+                          <input
+                            type="checkbox"
+                            className="rounded border-gray-300"
+                            checked={selectedContacts.includes(contact.id)}
+                            onChange={() => toggleSelectContact(contact.id)}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-3">
+                            <Avatar className="h-8 w-8">
+                              <AvatarFallback className="bg-primary/10 text-primary text-xs">
+                                {initials(contact.name)}
+                              </AvatarFallback>
+                            </Avatar>
+                            <div>
+                              <p className="text-sm font-medium">{contact.name}</p>
+                              {contact.email && (
+                                <p className="text-xs text-muted-foreground">{contact.email}</p>
+                              )}
+                            </div>
+                          </div>
+                        </TableCell>
+                        <TableCell className="hidden md:table-cell text-sm">{contact.phone_number}</TableCell>
+                        <TableCell>
+                          <div className="flex flex-wrap gap-1">
+                            {contact.tags && contact.tags.length > 0 ? (
+                              contact.tags.map((t) => (
+                                <Badge
+                                  key={t.id}
+                                  variant="secondary"
+                                  className="text-[10px] gap-1"
+                                  style={{ backgroundColor: (t.color || '#6b7280') + '20', color: t.color || '#6b7280', borderColor: (t.color || '#6b7280') + '40' }}
+                                >
+                                  {t.name}
+                                </Badge>
+                              ))
+                            ) : (
+                              <span className="text-xs text-muted-foreground">-</span>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell className="hidden lg:table-cell">
+                          <Badge variant="secondary" className={`text-[10px] ${stageColor(contact.stage)}`}>
+                            {contact.stage}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="hidden lg:table-cell text-xs text-muted-foreground">
+                          {format(new Date(contact.created_at), 'dd MMM yyyy')}
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-1">
+                            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEditContact(contact)}>
+                              <Edit className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 text-destructive"
+                              onClick={() => { if (confirm('Hapus kontak ini?')) deleteContactMutation.mutate(contact.id); }}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+
+          {/* Pagination */}
+          {meta && meta.totalPages > 1 && (
+            <div className="flex items-center justify-between">
+              <p className="text-sm text-muted-foreground">
+                Halaman {meta.page} dari {meta.totalPages} ({meta.total} kontak)
+              </p>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage(page - 1)}>Sebelumnya</Button>
+                <Button variant="outline" size="sm" disabled={page >= meta.totalPages} onClick={() => setPage(page + 1)}>Selanjutnya</Button>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* ============ LABELS TAB ============ */}
+      {activeTab === 'labels' && (
+        <>
+          {tags.length === 0 ? (
+            <Card>
+              <CardContent className="flex flex-col items-center justify-center py-16 text-center">
+                <Tags className="h-12 w-12 text-muted-foreground mb-4" />
+                <h3 className="text-lg font-semibold mb-1">Belum ada label</h3>
+                <p className="text-sm text-muted-foreground mb-4">Buat label untuk mengelompokkan kontak Anda</p>
+                <Button onClick={() => { resetLabelForm(); setLabelDialogOpen(true); }}>
+                  <Plus className="h-4 w-4 mr-2" /> Buat Label Pertama
+                </Button>
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {tags.map((tag) => (
+                <Card key={tag.id} className="group hover:shadow-md transition-shadow">
+                  <CardContent className="p-4">
+                    <div className="flex items-start justify-between">
                       <div className="flex items-center gap-3">
-                        <Avatar className="h-8 w-8">
-                          <AvatarFallback className="bg-primary/10 text-primary text-xs">
-                            {initials(contact.name)}
-                          </AvatarFallback>
-                        </Avatar>
+                        <div className="h-10 w-10 rounded-lg flex items-center justify-center" style={{ backgroundColor: (tag.color || '#6b7280') + '20' }}>
+                          <Tag className="h-5 w-5" style={{ color: tag.color || '#6b7280' }} />
+                        </div>
                         <div>
-                          <p className="text-sm font-medium">{contact.name}</p>
-                          {contact.email && (
-                            <p className="text-xs text-muted-foreground">{contact.email}</p>
-                          )}
+                          <p className="font-semibold">{tag.name}</p>
+                          <p className="text-xs text-muted-foreground">{tag._count.contact_tags} kontak</p>
                         </div>
                       </div>
-                    </TableCell>
-                    <TableCell className="hidden md:table-cell text-sm">{contact.phone_number}</TableCell>
-                    <TableCell className="hidden lg:table-cell text-sm text-muted-foreground">
-                      {contact.company || '-'}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="secondary" className={`text-[10px] ${stageColor(contact.stage)}`}>
-                        {contact.stage}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="hidden md:table-cell text-xs text-muted-foreground">
-                      {contact.source}
-                    </TableCell>
-                    <TableCell className="hidden lg:table-cell text-xs text-muted-foreground">
-                      {format(new Date(contact.created_at), 'dd MMM yyyy')}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-1">
-                        <Button variant="ghost" size="icon" className="h-7 w-7">
+                      <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEditLabel(tag)}>
                           <Edit className="h-3.5 w-3.5" />
                         </Button>
                         <Button
                           variant="ghost"
                           size="icon"
                           className="h-7 w-7 text-destructive"
-                          onClick={() => {
-                            if (confirm('Hapus kontak ini?')) deleteMutation.mutate(contact.id);
-                          }}
+                          onClick={() => { if (confirm(`Hapus label "${tag.name}"? Kontak tidak akan terhapus.`)) deleteLabelMutation.mutate(tag.id); }}
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </Button>
                       </div>
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+                    </div>
+                    {tag.description && (
+                      <p className="text-xs text-muted-foreground mt-2">{tag.description}</p>
+                    )}
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
+        </>
+      )}
 
-      {/* Pagination */}
-      {meta && meta.totalPages > 1 && (
-        <div className="flex items-center justify-between">
-          <p className="text-sm text-muted-foreground">
-            Halaman {meta.page} dari {meta.totalPages} ({meta.total} kontak)
-          </p>
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage(page - 1)}>
-              Sebelumnya
-            </Button>
-            <Button variant="outline" size="sm" disabled={page >= meta.totalPages} onClick={() => setPage(page + 1)}>
-              Selanjutnya
+      {/* ============ CONTACT DIALOG ============ */}
+      <Dialog open={contactDialogOpen} onOpenChange={(open) => { if (!open) { resetContactForm(); } setContactDialogOpen(open); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{editingContactId ? 'Edit Kontak' : 'Tambah Kontak Baru'}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Nama</Label>
+              <Input
+                placeholder="John Doe"
+                value={contactForm.name}
+                onChange={(e) => setContactForm({ ...contactForm, name: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Nomor WhatsApp</Label>
+              <Input
+                placeholder="6281234567890"
+                value={contactForm.phone_number}
+                onChange={(e) => setContactForm({ ...contactForm, phone_number: e.target.value })}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label>Email</Label>
+                <Input
+                  type="email"
+                  placeholder="email@contoh.com"
+                  value={contactForm.email}
+                  onChange={(e) => setContactForm({ ...contactForm, email: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Perusahaan</Label>
+                <Input
+                  placeholder="PT Contoh"
+                  value={contactForm.company}
+                  onChange={(e) => setContactForm({ ...contactForm, company: e.target.value })}
+                />
+              </div>
+            </div>
+
+            <Separator />
+
+            {/* Tag assignment */}
+            <div>
+              <Label className="flex items-center gap-1.5"><Tag className="h-4 w-4" /> Label</Label>
+              <p className="text-xs text-muted-foreground mb-2">Pilih label untuk kontak ini</p>
+              {tags.length > 0 ? (
+                <div className="flex flex-wrap gap-2">
+                  {tags.map((t) => (
+                    <Button
+                      key={t.id}
+                      type="button"
+                      variant={contactForm.tags.includes(t.name) ? 'default' : 'outline'}
+                      size="sm"
+                      className="h-7 text-xs gap-1"
+                      style={
+                        contactForm.tags.includes(t.name)
+                          ? { backgroundColor: t.color || undefined, borderColor: t.color || undefined }
+                          : { borderColor: (t.color || '#6b7280') + '60', color: t.color || undefined }
+                      }
+                      onClick={() => toggleContactTag(t.name)}
+                    >
+                      <Tag className="h-3 w-3" />
+                      {t.name}
+                    </Button>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground">Belum ada label. Buat label di tab Label terlebih dahulu.</p>
+              )}
+            </div>
+
+            <Button
+              className="w-full"
+              onClick={handleContactSubmit}
+              disabled={!contactForm.name || !contactForm.phone_number || createContactMutation.isPending || updateContactMutation.isPending}
+            >
+              {(createContactMutation.isPending || updateContactMutation.isPending) && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              {editingContactId ? 'Simpan Perubahan' : 'Tambah Kontak'}
             </Button>
           </div>
-        </div>
-      )}
+        </DialogContent>
+      </Dialog>
+
+      {/* ============ LABEL DIALOG ============ */}
+      <Dialog open={labelDialogOpen} onOpenChange={(open) => { if (!open) { resetLabelForm(); } setLabelDialogOpen(open); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>{editingLabelId ? 'Edit Label' : 'Buat Label Baru'}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Nama Label</Label>
+              <Input
+                placeholder="Contoh: Program Tahfidz, Kelas Batch 5"
+                value={labelForm.name}
+                onChange={(e) => setLabelForm({ ...labelForm, name: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Warna</Label>
+              <div className="flex flex-wrap gap-2">
+                {LABEL_COLORS.map((c) => (
+                  <button
+                    key={c.value}
+                    type="button"
+                    className={`h-8 w-8 rounded-full border-2 transition-all ${
+                      labelForm.color === c.value ? 'border-foreground scale-110' : 'border-transparent'
+                    }`}
+                    style={{ backgroundColor: c.value }}
+                    onClick={() => setLabelForm({ ...labelForm, color: c.value })}
+                    title={c.name}
+                  />
+                ))}
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Deskripsi (opsional)</Label>
+              <Input
+                placeholder="Deskripsi singkat label ini"
+                value={labelForm.description}
+                onChange={(e) => setLabelForm({ ...labelForm, description: e.target.value })}
+              />
+            </div>
+
+            {/* Preview */}
+            <div className="bg-muted/50 rounded-lg p-3">
+              <p className="text-xs text-muted-foreground mb-1">Preview:</p>
+              <Badge
+                variant="secondary"
+                className="text-xs gap-1"
+                style={{ backgroundColor: labelForm.color + '20', color: labelForm.color, borderColor: labelForm.color + '40' }}
+              >
+                <Tag className="h-3 w-3" />
+                {labelForm.name || 'Nama Label'}
+              </Badge>
+            </div>
+
+            <Button
+              className="w-full"
+              onClick={handleLabelSubmit}
+              disabled={!labelForm.name || createLabelMutation.isPending || updateLabelMutation.isPending}
+            >
+              {(createLabelMutation.isPending || updateLabelMutation.isPending) && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              {editingLabelId ? 'Simpan Perubahan' : 'Buat Label'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ============ BULK ASSIGN LABEL DIALOG ============ */}
+      <Dialog open={bulkLabelDialogOpen} onOpenChange={setBulkLabelDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Assign Label ke {selectedContacts.length} Kontak</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">Pilih label yang akan di-assign ke kontak yang dipilih</p>
+            {tags.length > 0 ? (
+              <div className="flex flex-wrap gap-2">
+                {tags.map((t) => (
+                  <Button
+                    key={t.id}
+                    type="button"
+                    variant={bulkTags.includes(t.name) ? 'default' : 'outline'}
+                    size="sm"
+                    className="h-7 text-xs gap-1"
+                    style={
+                      bulkTags.includes(t.name)
+                        ? { backgroundColor: t.color || undefined, borderColor: t.color || undefined }
+                        : { borderColor: (t.color || '#6b7280') + '60', color: t.color || undefined }
+                    }
+                    onClick={() => toggleBulkTag(t.name)}
+                  >
+                    <Tag className="h-3 w-3" />
+                    {t.name}
+                  </Button>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground">Belum ada label. Buat label di tab Label terlebih dahulu.</p>
+            )}
+            <Button
+              className="w-full"
+              onClick={handleBulkAssign}
+              disabled={bulkTags.length === 0 || bulkAssignMutation.isPending}
+            >
+              {bulkAssignMutation.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              Assign {bulkTags.length} Label ke {selectedContacts.length} Kontak
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ============ IMPORT DIALOG ============ */}
+      <Dialog open={importDialogOpen} onOpenChange={(open) => { if (!open) resetImport(); setImportDialogOpen(open); }}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileSpreadsheet className="h-5 w-5" /> Import Kontak dari CSV
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            {/* Download template + info */}
+            <div className="bg-muted/50 rounded-lg p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium">Belum punya file CSV?</p>
+                  <p className="text-xs text-muted-foreground">Download template lalu isi dengan data kontak Anda</p>
+                </div>
+                <Button variant="outline" size="sm" className="gap-1.5" onClick={downloadTemplate}>
+                  <Download className="h-4 w-4" /> Download Template
+                </Button>
+              </div>
+              <Separator />
+              <p className="text-xs text-muted-foreground">Kolom wajib: <strong>phone</strong> (atau nomor/wa/telepon). Opsional: nama, email, perusahaan. Delimiter: koma, titik koma, atau tab.</p>
+            </div>
+
+            {/* File upload */}
+            <div>
+              <input
+                ref={csvInputRef}
+                type="file"
+                accept=".csv,.txt,.tsv"
+                className="hidden"
+                onChange={handleCSVUpload}
+              />
+              <Button
+                variant="outline"
+                className="w-full h-20 border-dashed"
+                onClick={() => csvInputRef.current?.click()}
+              >
+                <div className="flex flex-col items-center gap-1">
+                  <Upload className="h-5 w-5 text-muted-foreground" />
+                  <span className="text-sm">{importFileName || 'Pilih file CSV'}</span>
+                </div>
+              </Button>
+            </div>
+
+            {/* Error */}
+            {importError && (
+              <div className="flex items-center gap-2 text-sm text-red-600 bg-red-50 p-3 rounded-lg">
+                <AlertCircle className="h-4 w-4 flex-shrink-0" />
+                {importError}
+              </div>
+            )}
+
+            {/* Preview */}
+            {importData.length > 0 && (
+              <>
+                <div className="flex items-center gap-2 text-sm text-emerald-600 bg-emerald-50 p-3 rounded-lg">
+                  <CheckCircle className="h-4 w-4 flex-shrink-0" />
+                  {importData.length} kontak valid ditemukan
+                </div>
+
+                <div className="border rounded-lg overflow-hidden">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="text-xs">No</TableHead>
+                        <TableHead className="text-xs">Telepon</TableHead>
+                        <TableHead className="text-xs">Nama</TableHead>
+                        <TableHead className="text-xs">Email</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {importData.slice(0, 10).map((row, i) => (
+                        <TableRow key={i}>
+                          <TableCell className="text-xs">{i + 1}</TableCell>
+                          <TableCell className="text-xs font-mono">{row.phone_number}</TableCell>
+                          <TableCell className="text-xs">{row.name || '-'}</TableCell>
+                          <TableCell className="text-xs">{row.email || '-'}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                  {importData.length > 10 && (
+                    <p className="text-xs text-muted-foreground text-center py-2">
+                      ...dan {importData.length - 10} kontak lainnya
+                    </p>
+                  )}
+                </div>
+
+                <Separator />
+
+                {/* Auto-assign labels */}
+                <div>
+                  <Label className="flex items-center gap-1.5"><Tag className="h-4 w-4" /> Assign Label (opsional)</Label>
+                  <p className="text-xs text-muted-foreground mb-2">Semua kontak yang diimport akan otomatis mendapat label ini</p>
+                  {tags.length > 0 ? (
+                    <div className="flex flex-wrap gap-2">
+                      {tags.map((t) => (
+                        <Button
+                          key={t.id}
+                          type="button"
+                          variant={importTags.includes(t.name) ? 'default' : 'outline'}
+                          size="sm"
+                          className="h-7 text-xs gap-1"
+                          style={
+                            importTags.includes(t.name)
+                              ? { backgroundColor: t.color || undefined, borderColor: t.color || undefined }
+                              : { borderColor: (t.color || '#6b7280') + '60', color: t.color || undefined }
+                          }
+                          onClick={() => toggleImportTag(t.name)}
+                        >
+                          <Tag className="h-3 w-3" />
+                          {t.name}
+                        </Button>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">Belum ada label. Buat label di tab Label terlebih dahulu.</p>
+                  )}
+                </div>
+
+                <Button
+                  className="w-full"
+                  onClick={handleImportSubmit}
+                  disabled={importMutation.isPending}
+                >
+                  {importMutation.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+                  Import {importData.length} Kontak
+                </Button>
+              </>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

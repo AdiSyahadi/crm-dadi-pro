@@ -2,6 +2,8 @@ import { prisma } from '../config/database';
 import { messageService } from './message.service';
 import { conversationService } from './conversation.service';
 import { getIO } from '../socket/io';
+import { dispatchWebhookEvent } from './webhook-dispatcher.service';
+import { autoResponseEngine } from './auto-response-engine';
 
 export class WebhookService {
   async handleIncomingMessage(payload: any) {
@@ -112,7 +114,9 @@ export class WebhookService {
       ? (data.contact_name || data.push_name || data.sender_name || data.notify || '')
       : (data.contact_name || '');
 
+    let isNewContact = false;
     if (!contact) {
+      isNewContact = true;
       contact = await prisma.contact.create({
         data: {
           organization_id: organizationId,
@@ -233,6 +237,30 @@ export class WebhookService {
       }
     }
 
+    // Dispatch to external webhooks (n8n, etc.)
+    const webhookEvent = direction === 'INCOMING' ? 'message.received' : 'message.sent';
+    dispatchWebhookEvent(organizationId, webhookEvent, {
+      contact: { id: contact.id, name: contact.name, phone_number: contact.phone_number },
+      message: { id: message.id, content: message.content, type: message.message_type, direction: message.direction },
+      conversation_id: conversation.id,
+      instance_id: instance.id,
+    });
+
+    // Auto-response evaluation (fire-and-forget, non-blocking)
+    if (direction === 'INCOMING') {
+      autoResponseEngine.evaluate({
+        organizationId,
+        instanceId: instance.id,
+        waInstanceId: instance.wa_instance_id,
+        contactId: contact.id,
+        contactName: contact.name || '',
+        contactPhone: phone,
+        conversationId: conversation.id,
+        contactTotalMessages: isNewContact ? 1 : (contact.total_messages || 0) + 1,
+        direction,
+      }).catch((err: any) => console.error('AutoResponse evaluate error:', err.message));
+    }
+
     return { contact, conversation, message };
   }
 
@@ -241,11 +269,21 @@ export class WebhookService {
   }
 
   async handleMessageStatus(payload: any) {
-    const { data } = payload;
+    const { instance_id, data } = payload;
     const messageId = data?.message_id || data?.id;
     if (!messageId || !data?.status) return;
 
-    const message = await messageService.updateStatus(messageId, data.status);
+    // Resolve organization from instance for tenant-scoped update
+    let organizationId: string | null = null;
+    if (instance_id) {
+      const instance = await prisma.wAInstance.findFirst({
+        where: { wa_instance_id: instance_id },
+        select: { organization_id: true },
+      });
+      organizationId = instance?.organization_id || null;
+    }
+
+    const message = await messageService.updateStatus(messageId, data.status, organizationId);
 
     if (message) {
       const io = getIO();
@@ -325,34 +363,36 @@ export class WebhookService {
     const { instance_id, data } = payload;
     if (!instance_id) return;
 
-    const instance = await prisma.wAInstance.findFirst({
+    const instances = await prisma.wAInstance.findMany({
       where: { wa_instance_id: instance_id },
     });
 
-    if (!instance) return;
+    if (instances.length === 0) return;
 
     const newStatus = data?.status === 'connected' ? 'CONNECTED' : 'DISCONNECTED';
 
-    await prisma.wAInstance.update({
-      where: { id: instance.id },
-      data: {
-        status: newStatus as any,
-        phone_number: data?.phone_number || instance.phone_number,
-        ...(data?.wa_display_name ? { wa_display_name: data.wa_display_name } : {}),
-        last_synced_at: new Date(),
-        ...(newStatus === 'CONNECTED' ? { connected_at: new Date() } : {}),
-      },
-    });
-
-    const io = getIO();
-    if (io) {
-      io.to(`org:${instance.organization_id}`).emit('instance:status', {
-        instance_id: instance.id,
-        wa_instance_id: instance.wa_instance_id,
-        status: newStatus,
-        phone_number: data?.phone_number,
-        wa_display_name: data?.wa_display_name,
+    for (const instance of instances) {
+      await prisma.wAInstance.update({
+        where: { id: instance.id },
+        data: {
+          status: newStatus as any,
+          phone_number: data?.phone_number || instance.phone_number,
+          ...(data?.wa_display_name ? { wa_display_name: data.wa_display_name } : {}),
+          last_synced_at: new Date(),
+          ...(newStatus === 'CONNECTED' ? { connected_at: new Date() } : {}),
+        },
       });
+
+      const io = getIO();
+      if (io) {
+        io.to(`org:${instance.organization_id}`).emit('instance:status', {
+          instance_id: instance.id,
+          wa_instance_id: instance.wa_instance_id,
+          status: newStatus,
+          phone_number: data?.phone_number,
+          wa_display_name: data?.wa_display_name,
+        });
+      }
     }
   }
 }

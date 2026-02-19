@@ -1,13 +1,21 @@
 import { prisma } from '../config/database';
 import { AppError } from '../utils/app-error';
 import { CreateContactInput, UpdateContactInput, ListContactsInput } from '../validators/contact.validator';
+import { dispatchWebhookEvent } from './webhook-dispatcher.service';
 
 export class ContactService {
-  async list(organizationId: string, input: ListContactsInput) {
+  async list(organizationId: string, input: ListContactsInput, assignedToUserId?: string) {
     const { page, limit, search, stage, source, tag, sort_by, sort_order } = input;
     const skip = (page - 1) * limit;
 
     const where: any = { organization_id: organizationId };
+
+    // AGENT isolation: only show contacts that have at least one conversation assigned to this agent
+    if (assignedToUserId) {
+      where.conversations = {
+        some: { assigned_to_user_id: assignedToUserId },
+      };
+    }
 
     if (search) {
       where.OR = [
@@ -57,9 +65,18 @@ export class ContactService {
     };
   }
 
-  async getById(organizationId: string, contactId: string) {
+  async getById(organizationId: string, contactId: string, assignedToUserId?: string) {
+    const where: any = { id: contactId, organization_id: organizationId };
+
+    // AGENT isolation: only allow access to contacts with assigned conversations
+    if (assignedToUserId) {
+      where.conversations = {
+        some: { assigned_to_user_id: assignedToUserId },
+      };
+    }
+
     const contact = await prisma.contact.findFirst({
-      where: { id: contactId, organization_id: organizationId },
+      where,
       include: {
         contact_tags: {
           include: { tag: { select: { id: true, name: true, color: true } } },
@@ -129,7 +146,9 @@ export class ContactService {
       await this.assignTags(organizationId, contact.id, tags);
     }
 
-    return this.getById(organizationId, contact.id);
+    const fullContact = await this.getById(organizationId, contact.id);
+    dispatchWebhookEvent(organizationId, 'contact.created', { contact: fullContact });
+    return fullContact;
   }
 
   async update(organizationId: string, contactId: string, input: UpdateContactInput) {
@@ -173,7 +192,9 @@ export class ContactService {
       }
     }
 
-    return this.getById(organizationId, contactId);
+    const updatedContact = await this.getById(organizationId, contactId);
+    dispatchWebhookEvent(organizationId, 'contact.updated', { contact: updatedContact });
+    return updatedContact;
   }
 
   async delete(organizationId: string, contactId: string) {
@@ -231,6 +252,23 @@ export class ContactService {
     return { created, skipped, errors, total: contacts.length };
   }
 
+  async bulkAssignTags(organizationId: string, contactIds: string[], tagNames: string[]) {
+    // Verify all contacts belong to this org
+    const count = await prisma.contact.count({
+      where: { id: { in: contactIds }, organization_id: organizationId },
+    });
+    if (count !== contactIds.length) {
+      throw AppError.badRequest('Satu atau lebih kontak tidak ditemukan');
+    }
+
+    let assigned = 0;
+    for (const contactId of contactIds) {
+      await this.assignTags(organizationId, contactId, tagNames);
+      assigned++;
+    }
+    return { assigned, tags: tagNames };
+  }
+
   private async assignTags(organizationId: string, contactId: string, tagNames: string[]) {
     for (const tagName of tagNames) {
       // Find or create tag
@@ -253,6 +291,57 @@ export class ContactService {
         // Duplicate, ignore
       }
     }
+  }
+  async listTags(organizationId: string) {
+    return prisma.tag.findMany({
+      where: { organization_id: organizationId },
+      orderBy: { name: 'asc' },
+      select: { id: true, name: true, color: true, description: true, _count: { select: { contact_tags: true } } },
+    });
+  }
+
+  async createTag(organizationId: string, input: { name: string; color?: string; description?: string }) {
+    const existing = await prisma.tag.findFirst({
+      where: { organization_id: organizationId, name: input.name },
+    });
+    if (existing) {
+      throw AppError.conflict('Label dengan nama ini sudah ada');
+    }
+    return prisma.tag.create({
+      data: {
+        organization_id: organizationId,
+        name: input.name,
+        color: input.color || null,
+        description: input.description || null,
+      },
+    });
+  }
+
+  async updateTag(organizationId: string, tagId: string, input: { name?: string; color?: string; description?: string }) {
+    const tag = await prisma.tag.findFirst({ where: { id: tagId, organization_id: organizationId } });
+    if (!tag) throw AppError.notFound('Label tidak ditemukan');
+
+    if (input.name && input.name !== tag.name) {
+      const dup = await prisma.tag.findFirst({
+        where: { organization_id: organizationId, name: input.name, id: { not: tagId } },
+      });
+      if (dup) throw AppError.conflict('Label dengan nama ini sudah ada');
+    }
+
+    return prisma.tag.update({
+      where: { id: tagId },
+      data: {
+        ...(input.name !== undefined && { name: input.name }),
+        ...(input.color !== undefined && { color: input.color || null }),
+        ...(input.description !== undefined && { description: input.description || null }),
+      },
+    });
+  }
+
+  async deleteTag(organizationId: string, tagId: string) {
+    const tag = await prisma.tag.findFirst({ where: { id: tagId, organization_id: organizationId } });
+    if (!tag) throw AppError.notFound('Label tidak ditemukan');
+    await prisma.tag.delete({ where: { id: tagId } });
   }
 }
 

@@ -4,7 +4,7 @@ import { WAApiClient } from './wa-api.client';
 import { conversationService } from './conversation.service';
 
 export class MessageService {
-  async getByConversation(conversationId: string, query: {
+  async getByConversation(organizationId: string, conversationId: string, query: {
     page?: number;
     limit?: number;
   }) {
@@ -12,9 +12,11 @@ export class MessageService {
     const limit = query.limit || 50;
     const skip = (page - 1) * limit;
 
+    const where = { conversation_id: conversationId, organization_id: organizationId };
+
     const [messages, total] = await Promise.all([
       prisma.message.findMany({
-        where: { conversation_id: conversationId },
+        where,
         skip,
         take: limit,
         orderBy: { created_at: 'desc' },
@@ -24,7 +26,7 @@ export class MessageService {
           },
         },
       }),
-      prisma.message.count({ where: { conversation_id: conversationId } }),
+      prisma.message.count({ where }),
     ]);
 
     return {
@@ -33,7 +35,7 @@ export class MessageService {
     };
   }
 
-  async sendText(organizationId: string, conversationId: string, content: string, userId: string) {
+  async sendText(organizationId: string, conversationId: string, content: string, userId: string | null) {
     const conversation = await conversationService.getById(organizationId, conversationId);
 
     const instance = await prisma.wAInstance.findUnique({
@@ -97,7 +99,7 @@ export class MessageService {
     }
 
     // Update conversation last message
-    await conversationService.updateLastMessage(conversationId, content, 'OUTGOING');
+    await conversationService.updateLastMessage(organizationId, conversationId, content, 'OUTGOING');
 
     return message;
   }
@@ -161,7 +163,7 @@ export class MessageService {
       message.error_message = errMsg;
     }
 
-    await conversationService.updateLastMessage(conversationId, caption || `[${mediaType}]`, 'OUTGOING');
+    await conversationService.updateLastMessage(organizationId, conversationId, caption || `[${mediaType}]`, 'OUTGOING');
 
     return message;
   }
@@ -211,15 +213,18 @@ export class MessageService {
 
     const direction = data.direction || 'INCOMING';
     const preview = data.content || data.caption || `[${data.messageType}]`;
-    await conversationService.updateLastMessage(data.conversationId, preview, direction);
+    await conversationService.updateLastMessage(data.organizationId, data.conversationId, preview, direction);
 
     return message;
   }
 
-  async updateStatus(waMessageId: string, status: string) {
-    const message = await prisma.message.findFirst({
-      where: { wa_message_id: waMessageId },
-    });
+  async updateStatus(waMessageId: string, status: string, organizationId?: string | null) {
+    const where: any = { wa_message_id: waMessageId };
+    if (organizationId) {
+      where.organization_id = organizationId;
+    }
+
+    const message = await prisma.message.findFirst({ where });
 
     if (!message) return null;
 
@@ -227,6 +232,186 @@ export class MessageService {
       where: { id: message.id },
       data: { status: status.toUpperCase() as any },
     });
+  }
+
+  /**
+   * Delete / recall a message.
+   * 1. Verify message belongs to org + conversation
+   * 2. Call WA API to delete on WhatsApp
+   * 3. Update message status to DELETED in DB
+   */
+  async deleteMessage(
+    organizationId: string,
+    conversationId: string,
+    messageId: string,
+    deleteFor: 'everyone' | 'me' = 'everyone'
+  ) {
+    // Find message
+    const message = await prisma.message.findFirst({
+      where: {
+        id: messageId,
+        organization_id: organizationId,
+        conversation_id: conversationId,
+      },
+    });
+
+    if (!message) {
+      throw AppError.notFound('Message not found');
+    }
+
+    if (message.status === 'DELETED') {
+      throw AppError.badRequest('Message already deleted');
+    }
+
+    // Get conversation for chat_jid
+    const conversation = await conversationService.getById(organizationId, conversationId);
+
+    const instance = await prisma.wAInstance.findUnique({
+      where: { id: message.instance_id },
+    });
+
+    if (!instance) {
+      throw AppError.notFound('WA Instance not found');
+    }
+
+    // Call WA API to delete on WhatsApp (only if wa_message_id exists)
+    if (message.wa_message_id) {
+      try {
+        const waClient = await WAApiClient.forOrganization(organizationId);
+        await waClient.deleteMessage(
+          instance.wa_instance_id,
+          message.wa_message_id,
+          conversation.chat_jid,
+          {
+            fromMe: message.direction === 'OUTGOING',
+            deleteFor,
+          }
+        );
+      } catch (error: any) {
+        const errMsg = error.response?.data?.error?.message
+          || error.response?.data?.message
+          || error.message
+          || 'Gagal menghapus pesan di WhatsApp';
+        throw AppError.badRequest(errMsg);
+      }
+    }
+
+    // Update message status to DELETED in DB
+    const updated = await prisma.message.update({
+      where: { id: message.id },
+      data: { status: 'DELETED' },
+      include: {
+        sent_by_user: {
+          select: { id: true, name: true, avatar_url: true },
+        },
+      },
+    });
+
+    return updated;
+  }
+
+  /**
+   * Edit a sent message.
+   * 1. Verify message belongs to org + conversation + is OUTGOING
+   * 2. Enforce 15-min window (soft check — WA server also enforces)
+   * 3. Call WA API to edit on WhatsApp
+   * 4. Update content + is_edited + edited_at in DB
+   */
+  async editMessage(
+    organizationId: string,
+    conversationId: string,
+    messageId: string,
+    newText: string
+  ) {
+    if (!newText || !newText.trim()) {
+      throw AppError.badRequest('new_text cannot be empty');
+    }
+
+    const message = await prisma.message.findFirst({
+      where: {
+        id: messageId,
+        organization_id: organizationId,
+        conversation_id: conversationId,
+      },
+    });
+
+    if (!message) {
+      throw AppError.notFound('Message not found');
+    }
+
+    if (message.direction !== 'OUTGOING') {
+      throw AppError.badRequest('Hanya bisa edit pesan yang kamu kirim');
+    }
+
+    if (message.status === 'DELETED') {
+      throw AppError.badRequest('Pesan sudah dihapus, tidak bisa diedit');
+    }
+
+    // Non-editable message types
+    if (['AUDIO', 'STICKER'].includes(message.message_type)) {
+      throw AppError.badRequest('Pesan audio/sticker tidak bisa diedit');
+    }
+
+    // 15-min window check
+    const sentAt = message.created_at.getTime();
+    const fifteenMin = 15 * 60 * 1000;
+    if (Date.now() - sentAt > fifteenMin) {
+      throw AppError.badRequest('Pesan sudah lewat 15 menit, tidak bisa diedit');
+    }
+
+    const conversation = await conversationService.getById(organizationId, conversationId);
+
+    const instance = await prisma.wAInstance.findUnique({
+      where: { id: message.instance_id },
+    });
+
+    if (!instance) {
+      throw AppError.notFound('WA Instance not found');
+    }
+
+    // Call WA API to edit
+    if (message.wa_message_id) {
+      try {
+        const waClient = await WAApiClient.forOrganization(organizationId);
+        await waClient.editMessage(
+          instance.wa_instance_id,
+          message.wa_message_id,
+          conversation.chat_jid,
+          newText.trim()
+        );
+      } catch (error: any) {
+        const errMsg = error.response?.data?.error?.message
+          || error.response?.data?.message
+          || error.message
+          || 'Gagal mengedit pesan di WhatsApp';
+        throw AppError.badRequest(errMsg);
+      }
+    }
+
+    // Determine which field to update: caption for media, content for text
+    const isMedia = message.media_url && ['IMAGE', 'VIDEO', 'DOCUMENT', 'VIEW_ONCE'].includes(message.message_type);
+    const updateData: any = {
+      is_edited: true,
+      edited_at: new Date(),
+    };
+    if (isMedia) {
+      updateData.caption = newText.trim();
+      updateData.content = newText.trim();
+    } else {
+      updateData.content = newText.trim();
+    }
+
+    const updated = await prisma.message.update({
+      where: { id: message.id },
+      data: updateData,
+      include: {
+        sent_by_user: {
+          select: { id: true, name: true, avatar_url: true },
+        },
+      },
+    });
+
+    return updated;
   }
 }
 

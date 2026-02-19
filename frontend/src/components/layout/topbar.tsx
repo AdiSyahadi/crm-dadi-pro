@@ -40,7 +40,8 @@ export function Topbar({ onMenuClick, title }: TopbarProps) {
           </span>
         </Button>
         <div className="hidden sm:block text-right">
-          <p className="text-sm font-medium">{user?.organization?.name}</p>
+          <p className="text-sm font-medium">{user?.name}</p>
+          <p className="text-xs text-muted-foreground">{user?.organization?.name}</p>
         </div>
       </div>
     </header>
