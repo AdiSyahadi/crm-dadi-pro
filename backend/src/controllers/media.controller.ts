@@ -35,7 +35,11 @@ export class MediaController {
     } catch (error: any) {
       if (error.response?.data) {
         const status = error.response.status || 500;
-        res.status(status).json({ success: false, message: error.response.data?.error || error.response.data?.message || 'Upload failed' });
+        const rawErr = error.response.data?.error;
+        const errMsg = typeof rawErr === 'object' && rawErr?.message
+          ? rawErr.message
+          : typeof rawErr === 'string' ? rawErr : (error.response.data?.message || 'Upload failed');
+        res.status(status).json({ success: false, message: errMsg });
         return;
       }
       next(error);

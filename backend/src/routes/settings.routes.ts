@@ -10,5 +10,6 @@ router.use(authenticate, tenantGuard);
 router.get('/wa-api', settingsController.getWaApiConfig.bind(settingsController));
 router.put('/wa-api', settingsController.updateWaApiConfig.bind(settingsController));
 router.post('/wa-api/test', settingsController.testWaApiConnection.bind(settingsController));
+router.patch('/organization', settingsController.updateOrganization.bind(settingsController));
 
 export default router;

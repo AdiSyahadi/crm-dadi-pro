@@ -3,6 +3,7 @@
 import { useState, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '@/lib/api';
+import { FeatureGate } from '@/components/feature-gate';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -260,6 +261,7 @@ export default function BroadcastsPage() {
   });
 
   return (
+    <FeatureGate feature="broadcast">
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
@@ -622,5 +624,6 @@ export default function BroadcastsPage() {
         </CardContent>
       </Card>
     </div>
+    </FeatureGate>
   );
 }

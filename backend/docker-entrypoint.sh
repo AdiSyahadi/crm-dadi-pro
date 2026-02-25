@@ -9,5 +9,5 @@ npx prisma db push --url "$DATABASE_URL" --accept-data-loss 2>&1 || {
 }
 echo "✅ Database schema synced"
 
-echo "🚀 Starting CRM-DADI backend..."
+echo "🚀 Starting Power WA backend..."
 exec node dist/server.js

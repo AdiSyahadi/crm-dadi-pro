@@ -61,7 +61,7 @@ export class WebhookConfigService {
       event: 'webhook.test',
       timestamp: new Date().toISOString(),
       data: {
-        message: 'This is a test webhook from CRM-DADI',
+        message: 'This is a test webhook from Power WA',
         webhook_config_id: config.id,
       },
     };

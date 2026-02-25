@@ -274,9 +274,12 @@ export class BroadcastService {
       } catch (error: any) {
         console.error(`📤 Broadcast send failed to ${recipient.phone_number}:`, JSON.stringify(error.response?.data || error.message));
         const rawErr = error.response?.data?.error;
-        const errMsg = typeof rawErr === 'string' ? rawErr : (error.message || String(rawErr || ''));
-        const isDailyLimit = errMsg.includes('Daily message limit') || error.response?.data?.code === 'INSTANCE_003';
-        const isDisconnected = errMsg.includes('not connected') || error.response?.data?.code === 'INSTANCE_002';
+        const errMsg = typeof rawErr === 'object' && rawErr?.message
+          ? rawErr.message
+          : typeof rawErr === 'string' ? rawErr : (error.response?.data?.message || error.message || '');
+        const errCode = (typeof rawErr === 'object' && rawErr?.code) || error.response?.data?.code || '';
+        const isDailyLimit = errMsg.includes('Daily message limit') || errCode === 'INSTANCE_003' || errCode === 'RATE_LIMITED';
+        const isDisconnected = errMsg.includes('not connected') || errCode === 'INSTANCE_002' || errCode === 'INSTANCE_NOT_CONNECTED';
 
         await prisma.broadcastRecipient.update({
           where: { id: recipient.id },

@@ -18,6 +18,9 @@ import {
   LogOut,
   ChevronLeft,
   Wifi,
+  Lock,
+  Shield,
+  CreditCard,
 } from 'lucide-react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
@@ -29,23 +32,37 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
+import { type PlanFeatures } from '@/stores/auth.store';
+import { usePlan } from '@/hooks/use-plan';
+import { Badge } from '@/components/ui/badge';
 
 const ALL_ROLES = ['OWNER', 'ADMIN', 'SUPERVISOR', 'AGENT'] as const;
 const MANAGEMENT = ['OWNER', 'ADMIN', 'SUPERVISOR'] as const;
 const ADMIN_UP = ['OWNER', 'ADMIN'] as const;
 
-const navItems = [
+type NavItem = {
+  label: string;
+  href: string;
+  icon: React.ComponentType<{ className?: string }>;
+  badge?: boolean;
+  roles: readonly string[];
+  /** If set, nav item is only visible when this feature is enabled */
+  requiredFeature?: keyof PlanFeatures;
+};
+
+const navItems: NavItem[] = [
   { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, roles: ALL_ROLES },
   { label: 'Chat', href: '/dashboard/chat', icon: MessageSquare, badge: true, roles: ALL_ROLES },
   { label: 'Kontak', href: '/dashboard/contacts', icon: Users, roles: ALL_ROLES },
-  { label: 'Deals', href: '/dashboard/deals', icon: Handshake, roles: ALL_ROLES },
-  { label: 'Broadcast', href: '/dashboard/broadcasts', icon: Send, roles: MANAGEMENT },
-  { label: 'Jadwal Pesan', href: '/dashboard/scheduled-messages', icon: CalendarClock, roles: MANAGEMENT },
+  { label: 'Deals', href: '/dashboard/deals', icon: Handshake, roles: ALL_ROLES, requiredFeature: 'deals' },
+  { label: 'Broadcast', href: '/dashboard/broadcasts', icon: Send, roles: MANAGEMENT, requiredFeature: 'broadcast' },
+  { label: 'Jadwal Pesan', href: '/dashboard/scheduled-messages', icon: CalendarClock, roles: MANAGEMENT, requiredFeature: 'scheduledMessages' },
   { label: 'Template', href: '/dashboard/templates', icon: FileText, roles: ALL_ROLES },
   { label: 'Instansi WA', href: '/dashboard/instances', icon: Wifi, roles: ADMIN_UP },
   { label: 'Analitik', href: '/dashboard/analytics', icon: BarChart3, roles: MANAGEMENT },
   { label: 'Tim', href: '/dashboard/team', icon: UsersRound, roles: MANAGEMENT },
   { label: 'Pengaturan', href: '/dashboard/settings', icon: Settings, roles: ADMIN_UP },
+  { label: 'Billing', href: '/dashboard/billing', icon: CreditCard, roles: ['OWNER'] as const },
 ];
 
 interface SidebarProps {
@@ -57,6 +74,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const pathname = usePathname();
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
+  const { planLimits } = usePlan();
 
   const initials = user?.name
     ?.split(' ')
@@ -64,6 +82,23 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
     .join('')
     .toUpperCase()
     .slice(0, 2) || 'U';
+
+  /** Check if a nav item should be shown and whether it's locked */
+  const getNavState = (item: NavItem) => {
+    // SUPER_ADMIN sees everything, no locks
+    if (user?.role === 'SUPER_ADMIN') {
+      return { visible: true, locked: false };
+    }
+    // Role check
+    if (user?.role && !(item.roles as readonly string[]).includes(user.role)) {
+      return { visible: false, locked: false };
+    }
+    // Feature check
+    if (item.requiredFeature && !planLimits.features[item.requiredFeature]) {
+      return { visible: true, locked: true };
+    }
+    return { visible: true, locked: false };
+  };
 
   return (
     <TooltipProvider delayDuration={0}>
@@ -81,7 +116,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
                 <MessageSquare className="h-4 w-4 text-primary-foreground" />
               </div>
               <span className="text-lg font-bold bg-gradient-to-r from-[#687EFF] to-[#80B3FF] bg-clip-text text-transparent">
-                CRM-DADI
+                Power WA
               </span>
             </Link>
           )}
@@ -104,12 +139,35 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
         {/* Navigation */}
         <ScrollArea className="flex-1 py-3">
           <nav className="space-y-1 px-2">
-            {navItems.filter((item) => !user?.role || (item.roles as readonly string[]).includes(user.role)).map((item) => {
-              const isActive = item.href === '/dashboard'
-                ? pathname === '/dashboard'
-                : pathname.startsWith(item.href);
+            {navItems.map((item) => {
+              const { visible, locked } = getNavState(item);
+              if (!visible) return null;
 
-              const linkContent = (
+              const isActive = !locked && (
+                item.href === '/dashboard'
+                  ? pathname === '/dashboard'
+                  : pathname.startsWith(item.href)
+              );
+
+              const linkContent = locked ? (
+                <div
+                  key={item.href}
+                  className={cn(
+                    'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors cursor-not-allowed opacity-50',
+                    'text-muted-foreground',
+                    collapsed && 'justify-center px-2'
+                  )}
+                  title={`Upgrade paket untuk mengakses ${item.label}`}
+                >
+                  <item.icon className="h-5 w-5 shrink-0" />
+                  {!collapsed && (
+                    <>
+                      <span className="flex-1">{item.label}</span>
+                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-5">PRO</Badge>
+                    </>
+                  )}
+                </div>
+              ) : (
                 <Link
                   key={item.href}
                   href={item.href}
@@ -139,6 +197,36 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
             })}
           </nav>
         </ScrollArea>
+
+        {/* Super Admin link */}
+        {user?.role === 'SUPER_ADMIN' && (
+          <>
+            <Separator />
+            <div className="px-2 py-2">
+              {collapsed ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Link
+                      href="/admin"
+                      className="flex items-center justify-center rounded-lg px-2 py-2 text-sm font-medium text-red-600 hover:bg-red-500/10 transition-colors dark:text-red-400"
+                    >
+                      <Shield className="h-5 w-5" />
+                    </Link>
+                  </TooltipTrigger>
+                  <TooltipContent side="right">Panel Admin</TooltipContent>
+                </Tooltip>
+              ) : (
+                <Link
+                  href="/admin"
+                  className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-red-600 hover:bg-red-500/10 transition-colors dark:text-red-400"
+                >
+                  <Shield className="h-5 w-5" />
+                  <span>Panel Admin</span>
+                </Link>
+              )}
+            </div>
+          </>
+        )}
 
         <Separator />
 

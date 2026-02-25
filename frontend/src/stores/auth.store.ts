@@ -2,16 +2,61 @@ import { create } from 'zustand';
 import api from '@/lib/api';
 import { connectSocket, disconnectSocket } from '@/lib/socket';
 
+export interface PlanFeatures {
+  broadcast: boolean;
+  scheduledMessages: boolean;
+  deals: boolean;
+  closingReport: boolean;
+  autoResponseNewChat: boolean;
+  autoResponseOutsideHours: boolean;
+  webhookConfigs: boolean;
+  webhookAutoReply: boolean;
+  teamManagement: boolean;
+  assignConversation: boolean;
+  conversationLabels: boolean;
+  conversationPriority: boolean;
+  contactImport: boolean;
+  contactCustomFields: boolean;
+  editMessage: boolean;
+  analyticsMessageVolume: boolean;
+  analyticsAgentPerformance: boolean;
+  analyticsContactGrowth: boolean;
+  apiAccess: boolean;
+  scheduleBroadcast: boolean;
+  broadcastMedia: boolean;
+}
+
+export interface PlanLimits {
+  maxUsers: number;
+  maxContacts: number;
+  maxWaInstances: number;
+  maxTemplates: number;
+  maxBroadcastsPerMonth: number;
+  maxRecipientsPerBroadcast: number;
+  maxScheduledMessages: number;
+  maxDeals: number;
+  maxTags: number;
+  maxWebhookConfigs: number;
+  dailyMessageLimit: number;
+  maxImportBatchSize: number;
+  maxStorageMb: number;
+  features: PlanFeatures;
+  analyticsMaxDays: number;
+}
+
 interface User {
   id: string;
   name: string;
   email: string;
+  phone: string | null;
   role: string;
   avatar_url: string | null;
   organization: {
     id: string;
     name: string;
     slug: string;
+    plan?: string;
+    planLimits?: PlanLimits;
   };
 }
 

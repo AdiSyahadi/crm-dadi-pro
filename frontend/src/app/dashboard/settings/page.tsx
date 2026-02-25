@@ -49,6 +49,51 @@ export default function SettingsPage() {
   const logout = useAuthStore((s) => s.logout);
   const queryClient = useQueryClient();
   const [pwForm, setPwForm] = useState({ oldPassword: '', newPassword: '', confirmPassword: '' });
+  const [profileForm, setProfileForm] = useState({ name: '', phone: '' });
+  const fetchProfile = useAuthStore((s) => s.fetchProfile);
+
+  // Sync profile form when user data loads/changes
+  useEffect(() => {
+    if (user) {
+      setProfileForm({ name: user.name || '', phone: user.phone || '' });
+    }
+  }, [user]);
+
+  // Save profile mutation
+  const saveProfileMutation = useMutation({
+    mutationFn: async (input: { name: string; phone: string }) => {
+      await api.patch('/auth/profile', input);
+    },
+    onSuccess: async () => {
+      await fetchProfile();
+      toast.success('Profil berhasil disimpan');
+    },
+    onError: (err: any) => {
+      toast.error(err.response?.data?.error?.message || 'Gagal menyimpan profil');
+    },
+  });
+
+  // Org form state
+  const [orgName, setOrgName] = useState('');
+
+  useEffect(() => {
+    if (user?.organization?.name) {
+      setOrgName(user.organization.name);
+    }
+  }, [user?.organization?.name]);
+
+  const saveOrgMutation = useMutation({
+    mutationFn: async (input: { name: string }) => {
+      await api.patch('/settings/organization', input);
+    },
+    onSuccess: async () => {
+      await fetchProfile();
+      toast.success('Organisasi berhasil diperbarui');
+    },
+    onError: (err: any) => {
+      toast.error(err.response?.data?.error?.message || 'Gagal menyimpan organisasi');
+    },
+  });
 
   // Auto-response state
   const [arNewChatTemplateId, setArNewChatTemplateId] = useState('');
@@ -448,16 +493,45 @@ export default function SettingsPage() {
 
               <Separator />
 
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-2">
-                  <Label>Nama</Label>
-                  <Input defaultValue={user?.name || ''} />
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (!profileForm.name.trim()) {
+                    toast.error('Nama tidak boleh kosong');
+                    return;
+                  }
+                  saveProfileMutation.mutate(profileForm);
+                }}
+              >
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label>Nama</Label>
+                    <Input
+                      value={profileForm.name}
+                      onChange={(e) => setProfileForm({ ...profileForm, name: e.target.value })}
+                      placeholder="Nama lengkap"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Email</Label>
+                    <Input defaultValue={user?.email || ''} type="email" disabled />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Telepon</Label>
+                    <Input
+                      value={profileForm.phone}
+                      onChange={(e) => setProfileForm({ ...profileForm, phone: e.target.value })}
+                      placeholder="08xxxxxxxxxx"
+                    />
+                  </div>
                 </div>
-                <div className="space-y-2">
-                  <Label>Email</Label>
-                  <Input defaultValue={user?.email || ''} type="email" />
+                <div className="flex justify-end mt-4">
+                  <Button type="submit" disabled={saveProfileMutation.isPending}>
+                    {saveProfileMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                    Simpan Profil
+                  </Button>
                 </div>
-              </div>
+              </form>
 
               <Separator />
 
@@ -531,43 +605,83 @@ export default function SettingsPage() {
               <CardDescription>Pengaturan organisasi Anda</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-2">
-                  <Label>Nama Organisasi</Label>
-                  <Input defaultValue={user?.organization?.name || ''} />
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (!orgName.trim() || orgName.trim().length < 2) {
+                    toast.error('Nama organisasi minimal 2 karakter');
+                    return;
+                  }
+                  saveOrgMutation.mutate({ name: orgName.trim() });
+                }}
+              >
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label>Nama Organisasi</Label>
+                    <Input
+                      value={orgName}
+                      onChange={(e) => setOrgName(e.target.value)}
+                      placeholder="Nama organisasi"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Slug</Label>
+                    <Input defaultValue={user?.organization?.slug || ''} disabled />
+                  </div>
                 </div>
-                <div className="space-y-2">
-                  <Label>Slug</Label>
-                  <Input defaultValue={user?.organization?.slug || ''} disabled />
+
+                <Separator className="my-4" />
+
+                <div className="rounded-lg border p-4 bg-muted/30">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Shield className="h-4 w-4 text-primary" />
+                    <h3 className="text-sm font-semibold">Paket Saat Ini</h3>
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    Anda menggunakan paket{' '}
+                    <span className="font-semibold text-foreground">
+                      {user?.organization?.plan || 'FREE'}
+                    </span>.
+                    Upgrade untuk fitur lebih lengkap.
+                  </p>
+                  <Button type="button" variant="outline" size="sm" className="mt-3" onClick={() => window.location.href = '/dashboard/billing'}>
+                    Upgrade Paket
+                  </Button>
                 </div>
-              </div>
 
-              <Separator />
-
-              <div className="rounded-lg border p-4 bg-muted/30">
-                <div className="flex items-center gap-2 mb-2">
-                  <Shield className="h-4 w-4 text-primary" />
-                  <h3 className="text-sm font-semibold">Paket Saat Ini</h3>
+                <div className="flex justify-end mt-4">
+                  <Button type="submit" disabled={saveOrgMutation.isPending}>
+                    {saveOrgMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                    Simpan Perubahan
+                  </Button>
                 </div>
-                <p className="text-sm text-muted-foreground">
-                  Anda menggunakan paket <span className="font-semibold text-foreground">Free Trial</span>.
-                  Upgrade untuk fitur lebih lengkap.
-                </p>
-                <Button variant="outline" size="sm" className="mt-3">
-                  Upgrade Paket
-                </Button>
-              </div>
-
-              <div className="flex justify-end">
-                <Button>Simpan Perubahan</Button>
-              </div>
+              </form>
             </CardContent>
           </Card>
         </TabsContent>
 
         {/* Webhook Tab */}
         <TabsContent value="webhooks" className="space-y-4">
-          <WebhookSettings />
+          {user?.organization?.planLimits?.features?.webhookConfigs ? (
+            <WebhookSettings />
+          ) : (
+            <Card>
+              <CardContent className="flex flex-col items-center justify-center py-16 text-center">
+                <Lock className="h-12 w-12 text-muted-foreground/40 mb-4" />
+                <h3 className="text-lg font-semibold mb-1">Fitur Webhook (n8n / Integrasi)</h3>
+                <p className="text-sm text-muted-foreground max-w-md mb-4">
+                  Fitur Webhook hanya tersedia untuk paket <strong>Professional</strong> ke atas.
+                  Upgrade paket Anda untuk menghubungkan CRM dengan n8n, Zapier, atau sistem eksternal lainnya.
+                </p>
+                <a href="/dashboard/pricing">
+                  <Button>
+                    <Zap className="h-4 w-4 mr-2" />
+                    Lihat Paket &amp; Upgrade
+                  </Button>
+                </a>
+              </CardContent>
+            </Card>
+          )}
         </TabsContent>
 
         {/* Auto-Response Tab */}

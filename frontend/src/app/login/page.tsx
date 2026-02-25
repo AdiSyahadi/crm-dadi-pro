@@ -41,7 +41,7 @@ export default function LoginPage() {
             <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-white/20 backdrop-blur-sm">
               <MessageSquare className="h-7 w-7 text-white" />
             </div>
-            <h1 className="text-3xl font-bold">CRM-DADI</h1>
+            <h1 className="text-3xl font-bold">Power WA</h1>
           </div>
           <h2 className="text-2xl font-semibold mb-4">
             WhatsApp CRM Platform

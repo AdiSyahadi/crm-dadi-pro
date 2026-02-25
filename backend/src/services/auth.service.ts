@@ -7,6 +7,7 @@ import { env } from '../config/env';
 import { AppError } from '../utils/app-error';
 import { RegisterInput, LoginInput } from '../validators/auth.validator';
 import { JwtPayload } from '../middleware/auth';
+import { getPlanLimits } from '../config/plan-limits';
 
 type TransactionClient = Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>;
 
@@ -109,6 +110,8 @@ export class AuthService {
           id: organization.id,
           name: organization.name,
           slug: organization.slug,
+          plan: 'FREE' as const,
+          planLimits: getPlanLimits('FREE'),
         },
         accessToken,
         refreshToken,
@@ -180,6 +183,7 @@ export class AuthService {
         name: user.organization.name,
         slug: user.organization.slug,
         plan: user.organization.plan,
+        planLimits: getPlanLimits(user.organization.plan),
       },
       accessToken,
       refreshToken,
@@ -311,6 +315,8 @@ export class AuthService {
         id: user.organization.id,
         name: user.organization.name,
         slug: user.organization.slug,
+        plan: user.organization.plan,
+        planLimits: getPlanLimits(user.organization.plan),
       },
       accessToken,
       refreshToken,
@@ -334,6 +340,33 @@ export class AuthService {
       where: { user_id: userId, revoked_at: null },
       data: { revoked_at: new Date() },
     });
+  }
+
+  async updateProfile(userId: string, input: { name?: string; phone?: string }) {
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw AppError.notFound('User not found');
+
+    const data: Record<string, string> = {};
+    if (input.name && input.name.trim()) data.name = input.name.trim();
+    if (input.phone !== undefined) data.phone = input.phone?.trim() || '';
+
+    if (Object.keys(data).length === 0) {
+      throw AppError.badRequest('Tidak ada data yang diubah');
+    }
+
+    const updated = await prisma.user.update({
+      where: { id: userId },
+      data,
+    });
+
+    return {
+      id: updated.id,
+      name: updated.name,
+      email: updated.email,
+      phone: updated.phone,
+      avatar_url: updated.avatar_url,
+      role: updated.role,
+    };
   }
 
   async getProfile(userId: string) {
@@ -365,7 +398,10 @@ export class AuthService {
       role: user.role,
       is_online: user.is_online,
       last_seen_at: user.last_seen_at,
-      organization: user.organization,
+      organization: {
+        ...user.organization,
+        planLimits: getPlanLimits(user.organization.plan),
+      },
       created_at: user.created_at,
     };
   }

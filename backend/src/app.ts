@@ -4,6 +4,7 @@ import helmet from 'helmet';
 import morgan from 'morgan';
 import compression from 'compression';
 import cookieParser from 'cookie-parser';
+import path from 'path';
 import { env } from './config/env';
 import { errorHandler } from './middleware/error-handler';
 import routes from './routes';
@@ -54,6 +55,9 @@ if (env.isDev) {
 
 // Compression
 app.use(compression());
+
+// Serve uploaded files (payment proofs, etc.)
+app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
 
 // API Routes
 app.use('/api', routes);

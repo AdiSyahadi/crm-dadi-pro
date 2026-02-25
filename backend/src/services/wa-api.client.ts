@@ -56,6 +56,14 @@ export class WAApiClient {
     return data;
   }
 
+  /**
+   * Sanitize phone number for WA API v2.
+   * Only digits allowed, optional leading '+'. Strips dashes, spaces, parens, etc.
+   */
+  private sanitizePhone(phone: string): string {
+    return phone.replace(/[^0-9+]/g, '').replace(/(?!^)\+/g, '');
+  }
+
   // GET /instances then filter by ID (no per-instance endpoint)
   async getInstance(instanceId: string) {
     const { data } = await this.client.get('/instances');
@@ -87,7 +95,7 @@ export class WAApiClient {
   async sendText(instanceId: string, phone: string, message: string) {
     const { data } = await this.client.post('/messages/send-text', {
       instance_id: instanceId,
-      to: phone,
+      to: this.sanitizePhone(phone),
       message,
     });
     return data;
@@ -98,7 +106,7 @@ export class WAApiClient {
   async sendMedia(instanceId: string, phone: string, message: string, mediaUrl: string, mediaType?: string) {
     const { data } = await this.client.post('/messages/send-media', {
       instance_id: instanceId,
-      to: phone,
+      to: this.sanitizePhone(phone),
       media_url: mediaUrl,
       media_type: (mediaType || 'image').toLowerCase(),
       caption: message || undefined,

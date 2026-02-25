@@ -443,13 +443,17 @@ export class ScheduledMessageService {
         details.push({ phone: recipient.phone, status: 'sent' });
       } catch (error: any) {
         failedCount++;
-        const errMsg = error.response?.data?.error || error.message || 'Unknown error';
-        details.push({ phone: recipient.phone, status: 'failed', error: typeof errMsg === 'string' ? errMsg : String(errMsg) });
+        const rawErr = error.response?.data?.error;
+        const errMsg = typeof rawErr === 'object' && rawErr?.message
+          ? rawErr.message
+          : typeof rawErr === 'string' ? rawErr : (error.response?.data?.message || error.message || 'Unknown error');
+        const errCode = (typeof rawErr === 'object' && rawErr?.code) || '';
+        details.push({ phone: recipient.phone, status: 'failed', error: errMsg });
         console.error(`⏰ Scheduled send failed to ${recipient.phone}:`, errMsg);
 
         // Fatal: instance disconnected or daily limit → stop
-        const errStr = typeof errMsg === 'string' ? errMsg : String(errMsg);
-        if (errStr.includes('not connected') || errStr.includes('Daily message limit')) {
+        if (errMsg.includes('not connected') || errMsg.includes('Daily message limit')
+            || errCode === 'INSTANCE_NOT_CONNECTED' || errCode === 'RATE_LIMITED') {
           // Log remaining as failed
           failedCount += allRecipients.length - sentCount - failedCount;
           break;

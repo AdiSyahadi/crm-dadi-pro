@@ -6,6 +6,7 @@ import { disconnectRedis } from './config/redis';
 import { initSocketIO } from './socket/io';
 import { startBroadcastWorker } from './workers/broadcast.worker';
 import { startScheduledMessageWorker } from './workers/scheduled-message.worker';
+import { startExpiryWorker } from './workers/expiry.worker';
 import { syncService } from './services/sync.service';
 
 const server = http.createServer(app);
@@ -20,6 +21,7 @@ async function bootstrap(): Promise<void> {
   // Start background workers
   startBroadcastWorker();
   startScheduledMessageWorker();
+  startExpiryWorker();
 
   // Start sync polling for new messages from WA API (every 2 min)
   syncService.startPolling(120_000);
@@ -27,7 +29,7 @@ async function bootstrap(): Promise<void> {
   // Start server
   server.listen(env.PORT, () => {
     console.log(`
-🚀 CRM-DADI Backend Server
+🚀 Power WA Backend Server
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
 📡 Server:    ${env.APP_URL}
 🌍 Env:       ${env.NODE_ENV}

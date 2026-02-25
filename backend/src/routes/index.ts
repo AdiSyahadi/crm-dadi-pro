@@ -14,6 +14,12 @@ import mediaRoutes from './media.routes';
 import scheduledMessageRoutes from './scheduled-message.routes';
 import webhookConfigRoutes from './webhook-config.routes';
 import autoResponseRoutes from './auto-response.routes';
+import adminPlanRoutes from './admin-plan.routes';
+import adminOrgRoutes from './admin-org.routes';
+import adminDashboardRoutes from './admin-dashboard.routes';
+import invoiceRoutes from './invoice.routes';
+import pricingRoutes from './pricing.routes';
+import paymentSettingsRoutes from './payment-settings.routes';
 
 const router = Router();
 
@@ -46,6 +52,20 @@ router.use('/media', mediaRoutes);
 router.use('/scheduled-messages', scheduledMessageRoutes);
 router.use('/webhook-configs', webhookConfigRoutes);
 router.use('/auto-responses', autoResponseRoutes);
+
+// Admin routes (Super Admin only)
+router.use('/admin/plans', adminPlanRoutes);
+router.use('/admin/organizations', adminOrgRoutes);
+router.use('/admin/dashboard', adminDashboardRoutes);
+
+// Invoice routes (admin + tenant)
+router.use('/invoices', invoiceRoutes);
+
+// Payment settings (admin bank accounts + Midtrans config)
+router.use('/payment-settings', paymentSettingsRoutes);
+
+// Public pricing
+router.use('/pricing', pricingRoutes);
 
 // Webhook (public, verified by signature)
 router.use('/webhook', webhookRoutes);

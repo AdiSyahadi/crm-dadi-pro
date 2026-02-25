@@ -1,7 +1,7 @@
 {
-  "name": "crm-dadi-backend",
+  "name": "power-wa-backend",
   "version": "1.0.0",
-  "description": "CRM-DADI Backend API",
+  "description": "Power WA Backend API",
   "main": "dist/server.js",
   "scripts": {
     "dev": "tsx watch src/server.ts",

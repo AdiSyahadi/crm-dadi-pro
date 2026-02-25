@@ -16,6 +16,10 @@ model Organization {
   slug String @unique
 
   plan            Plan    @default(FREE)
+  subscription_plan_id String?
+  subscription_plan    SubscriptionPlan? @relation("OrgSubscriptionPlan", fields: [subscription_plan_id], references: [id])
+  subscription_status  SubscriptionStatus @default(TRIAL)
+  subscription_expires_at DateTime?
   wa_api_base_url String?
   wa_api_key      String? @db.Text
   wa_organization_id String?
@@ -45,6 +49,7 @@ model Organization {
   activity_logs  ActivityLog[]
   scheduled_messages ScheduledMessage[]
   auto_responses     AutoResponse[]
+  invoices           Invoice[]
 
   @@map("organizations")
 }
@@ -54,6 +59,130 @@ enum Plan {
   STARTER
   PROFESSIONAL
   ENTERPRISE
+}
+
+// ============================================
+// SUBSCRIPTION PLAN (DB-driven plan config)
+// ============================================
+
+model SubscriptionPlan {
+  id          String  @id @default(uuid())
+  plan_code   Plan    @unique
+  name        String
+  description String? @db.Text
+  price       Int     @default(0)           // harga dalam rupiah, 0 = gratis
+  billing_cycle String @default("monthly")  // monthly | yearly | lifetime
+
+  // Resource quotas (-1 = unlimited)
+  max_users                 Int @default(1)
+  max_contacts              Int @default(100)
+  max_wa_instances          Int @default(1)
+  max_templates             Int @default(5)
+  max_broadcasts_per_month  Int @default(0)
+  max_recipients_per_broadcast Int @default(0)
+  max_scheduled_messages    Int @default(0)
+  max_deals                 Int @default(0)
+  max_tags                  Int @default(3)
+  max_webhook_configs       Int @default(0)
+  daily_message_limit       Int @default(50)
+  max_import_batch_size     Int @default(0)
+  max_storage_mb            Int @default(100)
+  analytics_max_days        Int @default(7)
+
+  // Feature flags stored as JSON
+  features    Json
+
+  is_active   Boolean  @default(true)
+  sort_order  Int      @default(0)
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  invoices   Invoice[]
+  subscribed_organizations Organization[] @relation("OrgSubscriptionPlan")
+
+  @@map("subscription_plans")
+}
+
+// ============================================
+// PAYMENT CONFIG (Global: bank accounts + Midtrans)
+// ============================================
+
+model BankAccount {
+  id          String  @id @default(uuid())
+  bank_name   String                       // BCA, BNI, Mandiri, etc.
+  account_number String
+  account_holder String                     // Nama pemilik rekening
+  is_active   Boolean @default(true)
+  sort_order  Int     @default(0)
+
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  @@map("bank_accounts")
+}
+
+model PaymentConfig {
+  id    String @id @default(uuid())
+  key   String @unique                     // e.g. midtrans_server_key, midtrans_client_key, midtrans_environment
+  value String @db.Text
+  label String?                            // Human-readable label
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@map("payment_configs")
+}
+
+// ============================================
+// INVOICE (Payment tracking)
+// ============================================
+
+model Invoice {
+  id               String @id @default(uuid())
+  invoice_number   String @unique           // INV-20260201-XXXX
+  organization_id  String
+  organization     Organization @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  plan_id          String
+  plan             SubscriptionPlan @relation(fields: [plan_id], references: [id])
+
+  amount           Int                      // rupiah
+  status           InvoiceStatus @default(PENDING)
+  payment_method   String?                  // manual_transfer | midtrans | etc
+  payment_proof_url String?                 // URL bukti transfer
+  payment_gateway_id String?                // ID dari payment gateway
+
+  period_start     DateTime?
+  period_end       DateTime?
+
+  notes            String? @db.Text         // catatan admin
+  paid_at          DateTime?
+  verified_by      String?                  // user_id admin yang verifikasi
+  expired_at       DateTime?
+
+  created_at       DateTime @default(now())
+  updated_at       DateTime @updatedAt
+
+  @@index([organization_id])
+  @@index([status])
+  @@map("invoices")
+}
+
+enum InvoiceStatus {
+  PENDING
+  PAID
+  VERIFIED
+  EXPIRED
+  CANCELLED
+  REFUNDED
+}
+
+enum SubscriptionStatus {
+  TRIAL
+  ACTIVE
+  PAST_DUE
+  CANCELLED
+  EXPIRED
 }
 
 // ============================================
@@ -104,6 +233,7 @@ model User {
 }
 
 enum UserRole {
+  SUPER_ADMIN
   OWNER
   ADMIN
   SUPERVISOR

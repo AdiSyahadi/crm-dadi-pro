@@ -12,5 +12,6 @@ router.post('/logout', authController.logout);
 router.post('/accept-invite', authController.acceptInvite);
 router.post('/change-password', authenticate, tenantGuard, authController.changePassword);
 router.get('/profile', authenticate, tenantGuard, authController.getProfile);
+router.patch('/profile', authenticate, tenantGuard, authController.updateProfile);
 
 export default router;

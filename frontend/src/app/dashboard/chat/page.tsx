@@ -945,13 +945,32 @@ export default function ChatPage() {
                       {/* Hide placeholder text for media types when media_url is present */}
                       {!(msg.media_url && ['STICKER', 'IMAGE', 'VIDEO', 'AUDIO', 'VIEW_ONCE'].includes(msg.message_type) && (!msg.content || msg.content.startsWith('['))) && (
                         isEditing ? (
-                          <div className="flex flex-col gap-1.5 min-w-[200px]">
+                          <div className="flex flex-col gap-2 min-w-[240px]">
                             <textarea
-                              className="w-full rounded-md border bg-background text-foreground px-2 py-1 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-ring"
+                              className={cn(
+                                'w-full rounded-lg px-3 py-2 text-sm resize-none focus:outline-none',
+                                'border-0 ring-0 shadow-none',
+                                isOutgoing
+                                  ? 'bg-primary-foreground/15 text-primary-foreground placeholder:text-primary-foreground/50'
+                                  : 'bg-background/80 text-foreground placeholder:text-muted-foreground'
+                              )}
+                              style={{ overflow: 'hidden' }}
                               value={editText}
-                              onChange={(e) => setEditText(e.target.value)}
-                              rows={Math.min(editText.split('\n').length + 1, 6)}
-                              autoFocus
+                              onChange={(e) => {
+                                setEditText(e.target.value);
+                                // Auto-resize
+                                e.target.style.height = 'auto';
+                                e.target.style.height = Math.min(e.target.scrollHeight, 150) + 'px';
+                              }}
+                              ref={(el) => {
+                                if (el) {
+                                  el.focus();
+                                  el.style.height = 'auto';
+                                  el.style.height = Math.min(el.scrollHeight, 150) + 'px';
+                                  // Place cursor at end
+                                  el.selectionStart = el.selectionEnd = el.value.length;
+                                }
+                              }}
                               onKeyDown={(e) => {
                                 if (e.key === 'Enter' && !e.shiftKey) {
                                   e.preventDefault();
@@ -963,17 +982,27 @@ export default function ChatPage() {
                                 }
                               }}
                             />
-                            <div className="flex items-center gap-1 justify-end">
+                            <div className="flex items-center gap-2 justify-end">
                               <button
                                 onClick={() => { setEditingMessageId(null); setEditText(''); }}
-                                className="text-[10px] px-2 py-0.5 rounded bg-muted text-muted-foreground hover:bg-muted/80"
+                                className={cn(
+                                  'text-xs px-3 py-1 rounded-md font-medium transition-colors',
+                                  isOutgoing
+                                    ? 'text-primary-foreground/80 hover:bg-primary-foreground/15'
+                                    : 'text-muted-foreground hover:bg-muted'
+                                )}
                               >
                                 Batal
                               </button>
                               <button
                                 onClick={() => { if (editText.trim()) editMutation.mutate({ messageId: msg.id, newText: editText }); }}
                                 disabled={editMutation.isPending || !editText.trim()}
-                                className="text-[10px] px-2 py-0.5 rounded bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                                className={cn(
+                                  'text-xs px-3 py-1 rounded-md font-medium transition-colors disabled:opacity-50',
+                                  isOutgoing
+                                    ? 'bg-primary-foreground text-primary hover:bg-primary-foreground/90'
+                                    : 'bg-primary text-primary-foreground hover:bg-primary/90'
+                                )}
                               >
                                 {editMutation.isPending ? 'Menyimpan...' : 'Simpan'}
                               </button>

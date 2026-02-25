@@ -51,8 +51,8 @@ export class SettingsController {
       const orgId = req.user!.organizationId;
       const role = req.user!.role;
 
-      // Only OWNER and ADMIN can update WA API config
-      if (role !== 'OWNER' && role !== 'ADMIN') {
+      // Only OWNER, ADMIN, and SUPER_ADMIN can update WA API config
+      if (role !== 'OWNER' && role !== 'ADMIN' && role !== 'SUPER_ADMIN') {
         throw AppError.forbidden('Hanya OWNER atau ADMIN yang dapat mengubah konfigurasi WA API');
       }
 
@@ -133,6 +133,34 @@ export class SettingsController {
           error_detail: apiError.message,
         });
       }
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // PATCH /api/settings/organization
+  async updateOrganization(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const tenantId = (req as any).tenantId;
+      const userRole = (req as any).userRole;
+
+      if (!['OWNER', 'ADMIN', 'SUPER_ADMIN'].includes(userRole)) {
+        throw AppError.forbidden('Hanya OWNER atau ADMIN yang bisa mengubah organisasi');
+      }
+
+      const schema = z.object({
+        name: z.string().min(2, 'Nama organisasi minimal 2 karakter').max(100).trim(),
+      });
+
+      const parsed = schema.parse(req.body);
+
+      const updated = await prisma.organization.update({
+        where: { id: tenantId },
+        data: { name: parsed.name },
+        select: { id: true, name: true, slug: true, plan: true },
+      });
+
+      sendSuccess(res, updated, 'Organisasi berhasil diperbarui');
     } catch (error) {
       next(error);
     }

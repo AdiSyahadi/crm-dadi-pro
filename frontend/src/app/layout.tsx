@@ -6,7 +6,7 @@ import { Providers } from "@/components/providers";
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
 
 export const metadata: Metadata = {
-  title: "CRM-DADI | WhatsApp CRM Platform",
+  title: "Power WA | WhatsApp CRM Platform",
   description: "SaaS CRM with WhatsApp Integration for managing contacts, conversations, deals, and broadcasts.",
 };
 

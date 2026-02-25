@@ -57,7 +57,7 @@ export function authorize(...roles: string[]) {
       return;
     }
 
-    if (roles.length > 0 && !roles.includes(req.user.role)) {
+    if (roles.length > 0 && !roles.includes(req.user.role) && req.user.role !== 'SUPER_ADMIN') {
       next(AppError.forbidden('You do not have permission to access this resource'));
       return;
     }
