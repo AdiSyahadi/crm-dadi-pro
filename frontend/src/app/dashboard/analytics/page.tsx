@@ -3,7 +3,15 @@
 import { useQuery } from '@tanstack/react-query';
 import api from '@/lib/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Loader2, BarChart3, TrendingUp, Users, MessageSquare } from 'lucide-react';
+import { Loader2, BarChart3, TrendingUp, Users, MessageSquare, Download } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { toast } from 'sonner';
 import {
   AreaChart,
   Area,
@@ -61,11 +69,40 @@ export default function AnalyticsPage() {
   const totalOutgoing = (messageVolume || []).reduce((s: number, d: any) => s + d.outgoing, 0);
   const totalNewContacts = (contactGrowth?.daily || []).reduce((s: number, d: any) => s + d.count, 0);
 
+  const downloadCsv = async (type: 'conversations' | 'contacts' | 'deals') => {
+    try {
+      const { data } = await api.get(`/export/${type}`, { responseType: 'blob' });
+      const url = window.URL.createObjectURL(new Blob([data]));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${type}.csv`;
+      a.click();
+      window.URL.revokeObjectURL(url);
+      toast.success(`Export ${type} berhasil diunduh`);
+    } catch {
+      toast.error(`Gagal export ${type}`);
+    }
+  };
+
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Analitik</h1>
-        <p className="text-sm text-muted-foreground">Statistik dan performa 30 hari terakhir</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">Analitik</h1>
+          <p className="text-sm text-muted-foreground">Statistik dan performa 30 hari terakhir</p>
+        </div>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" size="sm">
+              <Download className="h-4 w-4 mr-1" /> Export CSV
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={() => downloadCsv('conversations')}>Export Percakapan</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => downloadCsv('contacts')}>Export Kontak</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => downloadCsv('deals')}>Export Deals</DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
       {/* Summary Cards */}

@@ -4,6 +4,7 @@ import { conversationService } from './conversation.service';
 import { getIO } from '../socket/io';
 import { dispatchWebhookEvent } from './webhook-dispatcher.service';
 import { autoResponseEngine } from './auto-response-engine';
+import { csatService } from './csat.service';
 
 export class WebhookService {
   async handleIncomingMessage(payload: any) {
@@ -116,19 +117,32 @@ export class WebhookService {
 
     let isNewContact = false;
     if (!contact) {
-      isNewContact = true;
-      contact = await prisma.contact.create({
-        data: {
-          organization_id: organizationId,
-          instance_id: instance.id,
-          phone_number: phone,
-          name: contactName || phone,
-          source: 'WHATSAPP',
-          first_message_at: new Date(),
-          last_message_at: new Date(),
-          total_messages: 1,
-        },
-      });
+      try {
+        isNewContact = true;
+        contact = await prisma.contact.create({
+          data: {
+            organization_id: organizationId,
+            instance_id: instance.id,
+            phone_number: phone,
+            name: contactName || phone,
+            source: 'WHATSAPP',
+            first_message_at: new Date(),
+            last_message_at: new Date(),
+            total_messages: 1,
+          },
+        });
+      } catch (err: any) {
+        // P2002 = unique constraint violation — concurrent webhook already created this contact
+        if (err.code === 'P2002') {
+          isNewContact = false;
+          contact = await prisma.contact.findFirst({
+            where: { organization_id: organizationId, phone_number: phone },
+          });
+          if (!contact) throw new Error(`Contact race: P2002 but re-fetch failed for ${phone}`);
+        } else {
+          throw err;
+        }
+      }
     } else {
       await prisma.contact.update({
         where: { id: contact.id },
@@ -259,6 +273,17 @@ export class WebhookService {
         contactTotalMessages: isNewContact ? 1 : (contact.total_messages || 0) + 1,
         direction,
       }).catch((err: any) => console.error('AutoResponse evaluate error:', err.message));
+
+      // CSAT rating detection — if conversation is RESOLVED and reply is 1-5
+      const content = message.content?.trim();
+      if (content && /^[1-5]$/.test(content) && conversation.status === 'RESOLVED') {
+        csatService.recordResponse(organizationId, {
+          conversation_id: conversation.id,
+          contact_id: contact.id,
+          rating: parseInt(content, 10),
+          resolved_by_id: conversation.resolved_by_id || undefined,
+        }).catch((err: any) => console.error('CSAT record error:', err.message));
+      }
     }
 
     return { contact, conversation, message };
@@ -273,16 +298,23 @@ export class WebhookService {
     const messageId = data?.message_id || data?.id;
     if (!messageId || !data?.status) return;
 
-    // Resolve organization from instance for tenant-scoped update
-    let organizationId: string | null = null;
-    if (instance_id) {
-      const instance = await prisma.wAInstance.findFirst({
-        where: { wa_instance_id: instance_id },
-        select: { organization_id: true },
-      });
-      organizationId = instance?.organization_id || null;
+    // Resolve organization from instance — REQUIRED for tenant-scoped update
+    if (!instance_id) {
+      console.warn('Webhook status: Missing instance_id, skipping');
+      return;
     }
 
+    const instance = await prisma.wAInstance.findFirst({
+      where: { wa_instance_id: instance_id },
+      select: { organization_id: true },
+    });
+
+    if (!instance?.organization_id) {
+      console.warn(`Webhook status: Unknown instance ${instance_id}, skipping`);
+      return;
+    }
+
+    const organizationId = instance.organization_id;
     const message = await messageService.updateStatus(messageId, data.status, organizationId);
 
     if (message) {
@@ -336,10 +368,6 @@ export class WebhookService {
         await prisma.conversation.updateMany({
           where: { contact_id: lidContact.id, organization_id: organizationId },
           data: { contact_id: realContact.id },
-        });
-        await prisma.message.updateMany({
-          where: { organization_id: organizationId, conversation_id: { in: (await prisma.conversation.findMany({ where: { contact_id: realContact.id }, select: { id: true } })).map(c => c.id) } },
-          data: {},
         });
         await prisma.contact.delete({ where: { id: lidContact.id } });
         console.log(`📡 LID resolved: merged ${lidNumber} → ${realPhone} (contact ${realContact.id})`);

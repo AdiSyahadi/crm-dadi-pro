@@ -11,6 +11,7 @@ router.use(authenticate, tenantGuard);
 router.get('/', requireFeature('deals'), dealController.list);
 router.get('/pipeline', requireFeature('deals'), dealController.pipeline);
 router.get('/report', requireFeature('closingReport'), dealController.closingReport);
+router.get('/forecast', requireFeature('deals'), dealController.forecast);
 router.get('/:id', requireFeature('deals'), dealController.getById);
 router.post('/', requireFeature('deals'), checkQuota('deals'), dealController.create);
 router.patch('/:id', requireFeature('deals'), dealController.update);

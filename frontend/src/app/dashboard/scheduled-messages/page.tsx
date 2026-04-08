@@ -3,6 +3,7 @@
 import { useState, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '@/lib/api';
+import { useConfirmStore } from '@/stores/confirm.store';
 import { FeatureGate } from '@/components/feature-gate';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -156,6 +157,7 @@ interface TagItem {
 
 export default function ScheduledMessagesPage() {
   const queryClient = useQueryClient();
+  const openConfirm = useConfirmStore((s) => s.openConfirm);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
@@ -552,7 +554,7 @@ export default function ScheduledMessagesPage() {
                           size="icon"
                           className="h-7 w-7 text-red-600"
                           onClick={() => {
-                            if (confirm('Hapus jadwal ini?')) deleteMutation.mutate(s.id);
+                            openConfirm({ title: 'Hapus jadwal pesan ini?', description: 'Jadwal akan dihapus permanen.', onConfirm: () => deleteMutation.mutate(s.id) });
                           }}
                           title="Hapus"
                         >

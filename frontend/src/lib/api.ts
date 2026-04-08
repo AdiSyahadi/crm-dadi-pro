@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { updateSocketAuthToken } from '@/lib/socket';
 
 export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
 
@@ -60,6 +61,8 @@ api.interceptors.response.use(
         if (data.data.refreshToken) {
           localStorage.setItem('refreshToken', data.data.refreshToken);
         }
+
+        updateSocketAuthToken(newToken);
 
         api.defaults.headers.common.Authorization = `Bearer ${newToken}`;
         processQueue(null, newToken);

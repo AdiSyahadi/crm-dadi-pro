@@ -298,8 +298,8 @@ export class BroadcastService {
         if (isDailyLimit || isDisconnected) {
           const reason = isDailyLimit ? 'Daily message limit reached' : 'Instance not connected';
           console.error(`⛔ Broadcast ${broadcastId} stopped: ${reason}`);
-          await prisma.broadcast.update({
-            where: { id: broadcastId },
+          await prisma.broadcast.updateMany({
+            where: { id: broadcastId, status: 'SENDING' },
             data: { status: 'PAUSED' },
           });
           return; // Exit processBroadcast entirely
@@ -311,18 +311,11 @@ export class BroadcastService {
       await new Promise((resolve) => setTimeout(resolve, delay * 1000));
     }
 
-    // Mark as completed
-    const finalBroadcast = await prisma.broadcast.findUnique({
-      where: { id: broadcastId },
-      select: { status: true },
+    // Mark as completed (atomic: only if still SENDING — prevents overwriting PAUSED/CANCELLED)
+    await prisma.broadcast.updateMany({
+      where: { id: broadcastId, status: 'SENDING' },
+      data: { status: 'COMPLETED', completed_at: new Date() },
     });
-
-    if (finalBroadcast?.status === 'SENDING') {
-      await prisma.broadcast.update({
-        where: { id: broadcastId },
-        data: { status: 'COMPLETED', completed_at: new Date() },
-      });
-    }
   }
 }
 

@@ -5,13 +5,26 @@ import { dispatchWebhookEvent } from './webhook-dispatcher.service';
 
 async function generateDealNumber(organizationId: string): Promise<string> {
   const year = new Date().getFullYear();
-  const count = await prisma.deal.count({
+  const prefix = `DEAL-${year}`;
+
+  // Find the highest existing deal number for this org+year instead of using count
+  const lastDeal = await prisma.deal.findFirst({
     where: {
       organization_id: organizationId,
-      deal_number: { startsWith: `DEAL-${year}` },
+      deal_number: { startsWith: prefix },
     },
+    orderBy: { deal_number: 'desc' },
+    select: { deal_number: true },
   });
-  return `DEAL-${year}-${String(count + 1).padStart(4, '0')}`;
+
+  let nextSeq = 1;
+  if (lastDeal) {
+    const parts = lastDeal.deal_number.split('-');
+    const lastSeq = parseInt(parts[parts.length - 1], 10);
+    if (!isNaN(lastSeq)) nextSeq = lastSeq + 1;
+  }
+
+  return `${prefix}-${String(nextSeq).padStart(4, '0')}`;
 }
 
 export class DealService {
@@ -112,42 +125,54 @@ export class DealService {
   }
 
   async create(organizationId: string, userId: string, input: CreateDealInput) {
-    const dealNumber = await generateDealNumber(organizationId);
+    // Retry loop handles race condition: two concurrent creates may generate same deal_number
+    let attempts = 0;
+    while (attempts < 3) {
+      const dealNumber = await generateDealNumber(organizationId);
+      try {
+        const deal = await prisma.deal.create({
+          data: {
+            organization_id: organizationId,
+            contact_id: input.contact_id,
+            conversation_id: input.conversation_id || null,
+            title: input.title,
+            description: input.description || null,
+            deal_number: dealNumber,
+            stage: (input.stage as any) || 'QUALIFICATION',
+            pipeline: input.pipeline || 'default',
+            value: input.value || 0,
+            currency: input.currency || 'IDR',
+            win_probability: input.win_probability || 0,
+            assigned_to_id: input.assigned_to_id || null,
+            expected_close_date: input.expected_close_date ? new Date(input.expected_close_date) : null,
+            products: input.products ? JSON.parse(JSON.stringify(input.products)) : null,
+            source: input.source || null,
+            custom_fields: input.custom_fields ? JSON.parse(JSON.stringify(input.custom_fields)) : null,
+          },
+        });
 
-    const deal = await prisma.deal.create({
-      data: {
-        organization_id: organizationId,
-        contact_id: input.contact_id,
-        conversation_id: input.conversation_id || null,
-        title: input.title,
-        description: input.description || null,
-        deal_number: dealNumber,
-        stage: (input.stage as any) || 'QUALIFICATION',
-        pipeline: input.pipeline || 'default',
-        value: input.value || 0,
-        currency: input.currency || 'IDR',
-        win_probability: input.win_probability || 0,
-        assigned_to_id: input.assigned_to_id || null,
-        expected_close_date: input.expected_close_date ? new Date(input.expected_close_date) : null,
-        products: input.products ? JSON.parse(JSON.stringify(input.products)) : null,
-        source: input.source || null,
-        custom_fields: input.custom_fields ? JSON.parse(JSON.stringify(input.custom_fields)) : null,
-      },
-    });
+        await prisma.dealActivity.create({
+          data: {
+            deal_id: deal.id,
+            user_id: userId,
+            type: 'CREATED',
+            title: `Deal created: ${deal.title}`,
+            metadata: JSON.parse(JSON.stringify({ deal_number: dealNumber, stage: deal.stage })),
+          },
+        });
 
-    await prisma.dealActivity.create({
-      data: {
-        deal_id: deal.id,
-        user_id: userId,
-        type: 'CREATED',
-        title: `Deal created: ${deal.title}`,
-        metadata: JSON.parse(JSON.stringify({ deal_number: dealNumber, stage: deal.stage })),
-      },
-    });
-
-    const fullDeal = await this.getById(organizationId, deal.id);
-    dispatchWebhookEvent(organizationId, 'deal.created', { deal: fullDeal });
-    return fullDeal;
+        const fullDeal = await this.getById(organizationId, deal.id);
+        dispatchWebhookEvent(organizationId, 'deal.created', { deal: fullDeal });
+        return fullDeal;
+      } catch (err: any) {
+        if (err.code === 'P2002' && attempts < 2) {
+          attempts++;
+          continue;
+        }
+        throw err;
+      }
+    }
+    throw AppError.badRequest('Failed to generate unique deal number');
   }
 
   async update(organizationId: string, userId: string, dealId: string, input: UpdateDealInput) {

@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import api from '@/lib/api';
+import { useConfirmStore } from '@/stores/confirm.store';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -37,6 +38,7 @@ interface MidtransConfig {
 
 // ======= Component =======
 export default function AdminPaymentSettingsPage() {
+  const openConfirm = useConfirmStore((s) => s.openConfirm);
   // ---- Bank Accounts ----
   const [banks, setBanks] = useState<BankAccount[]>([]);
   const [banksLoading, setBanksLoading] = useState(true);
@@ -125,8 +127,10 @@ export default function AdminPaymentSettingsPage() {
   };
 
   const handleDeleteBank = async (id: string) => {
-    if (!confirm('Yakin ingin menghapus rekening bank ini?')) return;
-    setDeletingId(id);
+    openConfirm({ title: 'Hapus rekening bank ini?', description: 'Rekening bank akan dihapus dari daftar pembayaran.', onConfirm: () => { setDeletingId(id); executeDeleteBank(id); } });
+  };
+
+  const executeDeleteBank = async (id: string) => {
     try {
       await api.delete(`/payment-settings/banks/${id}`);
       toast.success('Rekening bank berhasil dihapus');

@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '@/lib/api';
+import { useConfirmStore } from '@/stores/confirm.store';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -22,6 +23,7 @@ import Link from 'next/link';
 
 export default function InstancesPage() {
   const queryClient = useQueryClient();
+  const openConfirm = useConfirmStore((s) => s.openConfirm);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState({ name: '', phone_number: '', wa_instance_id: '' });
   const [remoteInstances, setRemoteInstances] = useState<any[]>([]);
@@ -41,6 +43,18 @@ export default function InstancesPage() {
       return data.data;
     },
   });
+
+  const { data: waApiSettings } = useQuery({
+    queryKey: ['wa-api-settings'],
+    queryFn: async () => {
+      const { data } = await api.get('/settings/wa-api');
+      return data.data;
+    },
+  });
+
+  const waApiDashboardUrl = waApiSettings?.wa_api_base_url
+    ? (() => { try { const u = new URL(waApiSettings.wa_api_base_url); return u.origin; } catch { return ''; } })()
+    : '';
 
   const instances = data || [];
 
@@ -328,7 +342,7 @@ export default function InstancesPage() {
                 <p className="text-xs text-muted-foreground text-center max-w-xs">
                   {qrDialog.errorMsg}
                 </p>
-                <a href="http://localhost:3000" target="_blank" rel="noopener noreferrer">
+                <a href={waApiDashboardUrl || '#'} target="_blank" rel="noopener noreferrer" className={cn(!waApiDashboardUrl && 'pointer-events-none opacity-50')}>
                   <Button variant="default" size="sm" className="mt-2">
                     Buka WA API Dashboard
                   </Button>
@@ -414,9 +428,7 @@ export default function InstancesPage() {
                         variant="ghost"
                         size="icon"
                         className="h-8 w-8 text-destructive"
-                        onClick={() => {
-                          if (confirm('Hapus instansi ini?')) deleteMutation.mutate(inst.id);
-                        }}
+                        onClick={() => openConfirm({ title: 'Hapus instansi ini?', description: 'Instansi WhatsApp akan dihapus permanen.', onConfirm: () => deleteMutation.mutate(inst.id) })}
                       >
                         <Trash2 className="h-3.5 w-3.5" />
                       </Button>

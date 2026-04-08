@@ -2,8 +2,28 @@ import { prisma } from '../config/database';
 import { AppError } from '../utils/app-error';
 import { WAApiClient } from './wa-api.client';
 import { conversationService } from './conversation.service';
+import { getIO } from '../socket/io';
 
 export class MessageService {
+  private async emitChatMessage(organizationId: string, conversationId: string, message: any) {
+    const io = getIO();
+    if (!io) return;
+
+    const conversation = await conversationService.getById(organizationId, conversationId);
+
+    io.to(`org:${organizationId}`).emit('chat:message', {
+      conversation,
+      message,
+    });
+
+    if (conversation.assigned_to_user_id) {
+      io.to(`user:${conversation.assigned_to_user_id}`).emit('chat:message', {
+        conversation,
+        message,
+      });
+    }
+  }
+
   async getByConversation(organizationId: string, conversationId: string, query: {
     page?: number;
     limit?: number;
@@ -98,7 +118,11 @@ export class MessageService {
       message.error_message = errMsg;
     }
 
-    // Update conversation last message
+    // Emit realtime FIRST so clients see the message immediately,
+    // even if the metadata update below were to fail.
+    await this.emitChatMessage(organizationId, conversationId, message);
+
+    // Update conversation last message metadata
     await conversationService.updateLastMessage(organizationId, conversationId, content, 'OUTGOING');
 
     return message;
@@ -163,6 +187,11 @@ export class MessageService {
       message.error_message = errMsg;
     }
 
+    // Emit realtime FIRST so clients see the message immediately,
+    // even if the metadata update below were to fail.
+    await this.emitChatMessage(organizationId, conversationId, message);
+
+    // Update conversation last message metadata
     await conversationService.updateLastMessage(organizationId, conversationId, caption || `[${mediaType}]`, 'OUTGOING');
 
     return message;
@@ -412,6 +441,32 @@ export class MessageService {
     });
 
     return updated;
+  }
+
+  async addInternalNote(organizationId: string, conversationId: string, content: string, userId: string) {
+    const conversation = await conversationService.getById(organizationId, conversationId);
+    const instance = await prisma.wAInstance.findUnique({ where: { id: conversation.instance_id } });
+    if (!instance) throw AppError.notFound('WA Instance not found');
+
+    const note = await prisma.message.create({
+      data: {
+        organization_id: organizationId,
+        conversation_id: conversationId,
+        instance_id: instance.id,
+        direction: 'OUTGOING',
+        message_type: 'TEXT',
+        content,
+        status: 'DELIVERED',
+        sent_by_user_id: userId,
+        is_internal_note: true,
+      },
+      include: {
+        sent_by_user: { select: { id: true, name: true, avatar_url: true } },
+      },
+    });
+
+    await this.emitChatMessage(organizationId, conversationId, note);
+    return note;
   }
 }
 

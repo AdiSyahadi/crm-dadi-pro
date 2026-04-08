@@ -1,16 +1,16 @@
 import { Request, Response, NextFunction } from 'express';
 import { conversationService } from '../services/conversation.service';
 import { messageService } from '../services/message.service';
-import { sendSuccess } from '../utils/api-response';
+import { sendSuccess, sendCreated } from '../utils/api-response';
 import { AppError } from '../utils/app-error';
 
 /**
- * AGENT role guard: verify the conversation is assigned to this agent.
+ * AGENT role guard: verify the conversation is assigned to this agent OR unassigned.
  * OWNER/ADMIN/SUPERVISOR can access any conversation in their org.
  * Standalone function so `this` binding is not required.
  */
 function verifyAgentAccess(req: Request, conversation: any): void {
-  if (req.user!.role === 'AGENT' && conversation.assigned_to_user_id !== req.user!.userId) {
+  if (req.user!.role === 'AGENT' && conversation.assigned_to_user_id !== null && conversation.assigned_to_user_id !== req.user!.userId) {
     throw AppError.forbidden('Agents can only access conversations assigned to them');
   }
 }
@@ -19,10 +19,11 @@ export class ConversationController {
 
   async list(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      // AGENT can only see conversations assigned to them
+      // AGENT can only see conversations assigned to them, OR unassigned conversations
+      const requestedAssignedTo = req.query.assigned_to as string | undefined;
       const assignedTo = req.user!.role === 'AGENT'
-        ? req.user!.userId
-        : req.query.assigned_to as string | undefined;
+        ? (requestedAssignedTo === 'unassigned' ? 'unassigned' : req.user!.userId)
+        : requestedAssignedTo;
 
       const result = await conversationService.list(req.user!.organizationId, {
         page: req.query.page ? Number(req.query.page) : undefined,
@@ -89,15 +90,36 @@ export class ConversationController {
     }
   }
 
+  async addInternalNote(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const { content } = req.body;
+      if (!content || typeof content !== 'string' || !content.trim()) {
+        res.status(400).json({ error: { message: 'Content is required' } });
+        return;
+      }
+      const conversationId = req.params.id as string;
+      const orgId = req.user!.organizationId;
+
+      const conversation = await conversationService.getById(orgId, conversationId);
+      verifyAgentAccess(req, conversation);
+
+      const note = await messageService.addInternalNote(orgId, conversationId, content.trim(), req.user!.userId);
+      sendCreated(res, note);
+    } catch (error) {
+      next(error);
+    }
+  }
+
   async assign(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const { user_id, team_id } = req.body;
+      const { user_id, team_id, transfer_note } = req.body;
       const conversation = await conversationService.assign(
         req.user!.organizationId,
         req.params.id as string,
         user_id,
         team_id,
-        req.user!.userId
+        req.user!.userId,
+        transfer_note
       );
       sendSuccess(res, conversation, 'Conversation assigned');
     } catch (error) {
@@ -191,6 +213,66 @@ export class ConversationController {
 
       const message = await messageService.editMessage(orgId, conversationId, messageId, newText);
       sendSuccess(res, message, 'Message edited');
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async bulkResolve(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const { conversation_ids } = req.body;
+      if (!Array.isArray(conversation_ids) || conversation_ids.length === 0) {
+        res.status(400).json({ success: false, error: { code: 'BAD_REQUEST', message: 'conversation_ids wajib diisi (array)' } });
+        return;
+      }
+      const result = await conversationService.bulkResolve(req.user!.organizationId, conversation_ids, req.user!.userId);
+      sendSuccess(res, result);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async bulkAssign(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const { conversation_ids, user_id } = req.body;
+      if (!Array.isArray(conversation_ids) || conversation_ids.length === 0 || !user_id) {
+        res.status(400).json({ success: false, error: { code: 'BAD_REQUEST', message: 'conversation_ids dan user_id wajib diisi' } });
+        return;
+      }
+      const result = await conversationService.bulkAssign(req.user!.organizationId, conversation_ids, user_id, req.user!.userId);
+      sendSuccess(res, result);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async bulkReopen(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const { conversation_ids } = req.body;
+      if (!Array.isArray(conversation_ids) || conversation_ids.length === 0) {
+        res.status(400).json({ success: false, error: { code: 'BAD_REQUEST', message: 'conversation_ids wajib diisi (array)' } });
+        return;
+      }
+      const result = await conversationService.bulkReopen(req.user!.organizationId, conversation_ids);
+      sendSuccess(res, result);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async getSummary(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const data = await conversationService.getSummary(req.user!.organizationId, req.params.id as string);
+      sendSuccess(res, data);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async getTotalUnread(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const total = await conversationService.getTotalUnread(req.user!.organizationId);
+      sendSuccess(res, { total });
     } catch (error) {
       next(error);
     }

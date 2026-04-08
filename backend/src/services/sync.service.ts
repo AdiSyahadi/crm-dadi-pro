@@ -1,6 +1,7 @@
 import { prisma } from '../config/database';
 import { WAApiClient } from './wa-api.client';
 import { conversationService } from './conversation.service';
+import { getIO } from '../socket/io';
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -219,7 +220,7 @@ export class SyncService {
             where: { id: conversation.id },
             data: {
               last_message_at: latestMsg.created_at,
-              last_message_preview: (latestMsg.content || latestMsg.caption || `[${latestMsg.message_type}]`).slice(0, 255),
+              last_message_preview: (latestMsg.content || latestMsg.caption || `[${latestMsg.message_type}]`).slice(0, 500),
               last_message_direction: latestMsg.direction,
               total_messages: await prisma.message.count({ where: { conversation_id: conversation.id } }),
             },
@@ -353,6 +354,8 @@ export class SyncService {
         const msgResult = await waClient.getMessageHistory(instance.wa_instance_id, phone, 10, chatJid);
         const remoteMessages = msgResult?.data || msgResult || [];
 
+        const newMessages: any[] = [];
+
         for (const rm of remoteMessages) {
           const msgContent = rm.content || rm.body || rm.text || '';
 
@@ -377,7 +380,7 @@ export class SyncService {
           const messageType = typeMap[rawType] || 'OTHER';
           if (!msgContent && !rm.media_url) continue;
 
-          await prisma.message.create({
+          const savedMsg = await prisma.message.create({
             data: {
               organization_id: organizationId,
               conversation_id: conversation.id,
@@ -392,7 +395,13 @@ export class SyncService {
               status: (rm.status || 'DELIVERED').toUpperCase() as any,
               created_at: rm.sent_at ? new Date(rm.sent_at) : (rm.created_at ? new Date(rm.created_at) : new Date()),
             },
+            include: {
+              sent_by_user: {
+                select: { id: true, name: true, avatar_url: true },
+              },
+            },
           });
+          newMessages.push(savedMsg);
           syncedMessages++;
         }
 
@@ -406,10 +415,32 @@ export class SyncService {
             where: { id: conversation.id },
             data: {
               last_message_at: latestMsg.created_at,
-              last_message_preview: (latestMsg.content || latestMsg.caption || `[${latestMsg.message_type}]`).slice(0, 255),
+              last_message_preview: (latestMsg.content || latestMsg.caption || `[${latestMsg.message_type}]`).slice(0, 500),
               last_message_direction: latestMsg.direction,
             },
           });
+        }
+
+        // Emit realtime for newly synced messages so frontend updates without refresh
+        if (newMessages.length > 0) {
+          const io = getIO();
+          if (io) {
+            const fullConversation = await conversationService.getById(organizationId, conversation.id);
+            for (const msg of newMessages) {
+              io.to(`org:${organizationId}`).emit('chat:message', {
+                conversation: fullConversation,
+                message: msg,
+              });
+            }
+            if (fullConversation.assigned_to_user_id) {
+              for (const msg of newMessages) {
+                io.to(`user:${fullConversation.assigned_to_user_id}`).emit('chat:message', {
+                  conversation: fullConversation,
+                  message: msg,
+                });
+              }
+            }
+          }
         }
       } catch (err: any) {
         // Skip errors silently

@@ -21,6 +21,15 @@ import {
   Lock,
   Shield,
   CreditCard,
+  Zap,
+  Star,
+  Timer,
+  CalendarDays,
+  Bot,
+  MessageCircle,
+  Receipt,
+  ClipboardCheck,
+  TrendingUp,
 } from 'lucide-react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
@@ -35,6 +44,7 @@ import {
 import { type PlanFeatures } from '@/stores/auth.store';
 import { usePlan } from '@/hooks/use-plan';
 import { Badge } from '@/components/ui/badge';
+import { useUnreadChat } from '@/hooks/use-unread-chat';
 
 const ALL_ROLES = ['OWNER', 'ADMIN', 'SUPERVISOR', 'AGENT'] as const;
 const MANAGEMENT = ['OWNER', 'ADMIN', 'SUPERVISOR'] as const;
@@ -55,11 +65,20 @@ const navItems: NavItem[] = [
   { label: 'Chat', href: '/dashboard/chat', icon: MessageSquare, badge: true, roles: ALL_ROLES },
   { label: 'Kontak', href: '/dashboard/contacts', icon: Users, roles: ALL_ROLES },
   { label: 'Deals', href: '/dashboard/deals', icon: Handshake, roles: ALL_ROLES, requiredFeature: 'deals' },
+  { label: 'Kwitansi', href: '/dashboard/receipts', icon: Receipt, roles: ALL_ROLES, requiredFeature: 'deals' },
+  { label: 'Tugas', href: '/dashboard/tasks', icon: ClipboardCheck, roles: ALL_ROLES, requiredFeature: 'deals' },
   { label: 'Broadcast', href: '/dashboard/broadcasts', icon: Send, roles: MANAGEMENT, requiredFeature: 'broadcast' },
   { label: 'Jadwal Pesan', href: '/dashboard/scheduled-messages', icon: CalendarClock, roles: MANAGEMENT, requiredFeature: 'scheduledMessages' },
   { label: 'Template', href: '/dashboard/templates', icon: FileText, roles: ALL_ROLES },
+  { label: 'Quick Reply', href: '/dashboard/quick-replies', icon: Zap, roles: ALL_ROLES },
   { label: 'Instansi WA', href: '/dashboard/instances', icon: Wifi, roles: ADMIN_UP },
   { label: 'Analitik', href: '/dashboard/analytics', icon: BarChart3, roles: MANAGEMENT },
+  { label: 'Forecasting', href: '/dashboard/forecasting', icon: TrendingUp, roles: MANAGEMENT, requiredFeature: 'deals' as keyof PlanFeatures },
+  { label: 'CSAT', href: '/dashboard/csat', icon: Star, roles: MANAGEMENT },
+  { label: 'SLA', href: '/dashboard/sla', icon: Timer, roles: MANAGEMENT },
+  { label: 'Hari Libur', href: '/dashboard/holidays', icon: CalendarDays, roles: ADMIN_UP },
+  { label: 'Chatbot', href: '/dashboard/chatbot', icon: Bot, roles: ADMIN_UP },
+  { label: 'Internal Chat', href: '/dashboard/internal-chat', icon: MessageCircle, roles: ALL_ROLES },
   { label: 'Tim', href: '/dashboard/team', icon: UsersRound, roles: MANAGEMENT },
   { label: 'Pengaturan', href: '/dashboard/settings', icon: Settings, roles: ADMIN_UP },
   { label: 'Billing', href: '/dashboard/billing', icon: CreditCard, roles: ['OWNER'] as const },
@@ -75,6 +94,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
   const { planLimits } = usePlan();
+  const chatUnread = useUnreadChat();
 
   const initials = user?.name
     ?.split(' ')
@@ -172,7 +192,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
                   key={item.href}
                   href={item.href}
                   className={cn(
-                    'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors',
+                    'relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors',
                     isActive
                       ? 'bg-primary/10 text-primary'
                       : 'text-muted-foreground hover:bg-muted hover:text-foreground',
@@ -180,7 +200,19 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
                   )}
                 >
                   <item.icon className={cn('h-5 w-5 shrink-0', isActive && 'text-primary')} />
-                  {!collapsed && <span>{item.label}</span>}
+                  {!collapsed && (
+                    <>
+                      <span className="flex-1">{item.label}</span>
+                      {item.badge && chatUnread > 0 && (
+                        <span className="flex h-5 min-w-[20px] items-center justify-center rounded-full bg-destructive px-1.5 text-[10px] font-bold text-destructive-foreground">
+                          {chatUnread > 99 ? '99+' : chatUnread}
+                        </span>
+                      )}
+                    </>
+                  )}
+                  {collapsed && item.badge && chatUnread > 0 && (
+                    <span className="absolute top-1 right-1 h-2.5 w-2.5 rounded-full bg-destructive" />
+                  )}
                 </Link>
               );
 

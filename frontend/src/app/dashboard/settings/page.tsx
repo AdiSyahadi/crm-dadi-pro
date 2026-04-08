@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '@/lib/api';
 import { useAuthStore } from '@/stores/auth.store';
+import { useConfirmStore } from '@/stores/confirm.store';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -40,6 +41,7 @@ import {
   Clock,
   UserPlus,
   Trash2,
+  Receipt,
 } from 'lucide-react';
 import { WebhookSettings } from '@/components/settings/webhook-settings';
 import { toast } from 'sonner';
@@ -47,6 +49,7 @@ import { toast } from 'sonner';
 export default function SettingsPage() {
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
+  const openConfirm = useConfirmStore((s) => s.openConfirm);
   const queryClient = useQueryClient();
   const [pwForm, setPwForm] = useState({ oldPassword: '', newPassword: '', confirmPassword: '' });
   const [profileForm, setProfileForm] = useState({ name: '', phone: '' });
@@ -276,7 +279,7 @@ export default function SettingsPage() {
         <p className="text-sm text-muted-foreground">Kelola profil dan pengaturan organisasi</p>
       </div>
 
-      <Tabs defaultValue="whatsapp">
+      <Tabs defaultValue="profile">
         <TabsList>
           <TabsTrigger value="whatsapp">
             <MessageSquare className="h-4 w-4 mr-1.5" />
@@ -301,6 +304,10 @@ export default function SettingsPage() {
           <TabsTrigger value="notifications">
             <Bell className="h-4 w-4 mr-1.5" />
             Notifikasi
+          </TabsTrigger>
+          <TabsTrigger value="receipt">
+            <Receipt className="h-4 w-4 mr-1.5" />
+            Kwitansi
           </TabsTrigger>
         </TabsList>
 
@@ -586,7 +593,10 @@ export default function SettingsPage() {
                     />
                   </div>
                 </div>
-                <div className="flex justify-end mt-4">
+                <div className="flex items-center justify-between mt-4">
+                  <p className="text-xs text-amber-600 flex items-center gap-1">
+                    ⚠️ Anda akan otomatis logout setelah mengubah password
+                  </p>
                   <Button type="submit" disabled={changePwMutation.isPending}>
                     {changePwMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
                     Ubah Password
@@ -709,7 +719,7 @@ export default function SettingsPage() {
                         </div>
                         <div className="flex items-center gap-2">
                           <Switch checked={rule.is_active} onCheckedChange={(v) => arToggleMutation.mutate({ trigger: 'NEW_CHAT', isActive: v })} />
-                          <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => { if (confirm('Hapus auto-response ini?')) arDeleteMutation.mutate('NEW_CHAT'); }}>
+                          <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => openConfirm({ title: 'Hapus auto-response ini?', description: 'Auto-response untuk chat baru akan dinonaktifkan.', onConfirm: () => arDeleteMutation.mutate('NEW_CHAT') })}>
                             <Trash2 className="h-3.5 w-3.5" />
                           </Button>
                         </div>
@@ -764,7 +774,7 @@ export default function SettingsPage() {
                         </div>
                         <div className="flex items-center gap-2">
                           <Switch checked={rule.is_active} onCheckedChange={(v) => arToggleMutation.mutate({ trigger: 'OUTSIDE_HOURS', isActive: v })} />
-                          <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => { if (confirm('Hapus auto-response ini?')) arDeleteMutation.mutate('OUTSIDE_HOURS'); }}>
+                          <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => openConfirm({ title: 'Hapus auto-response ini?', description: 'Auto-response di luar jam kerja akan dinonaktifkan.', onConfirm: () => arDeleteMutation.mutate('OUTSIDE_HOURS') })}>
                             <Trash2 className="h-3.5 w-3.5" />
                           </Button>
                         </div>
@@ -816,36 +826,264 @@ export default function SettingsPage() {
 
         {/* Notifications Tab */}
         <TabsContent value="notifications" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Pengaturan Notifikasi</CardTitle>
-              <CardDescription>Atur notifikasi yang ingin Anda terima</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-4">
-                {[
-                  { label: 'Pesan masuk baru', desc: 'Notifikasi saat ada pesan WhatsApp masuk' },
-                  { label: 'Percakapan ditugaskan', desc: 'Notifikasi saat percakapan ditugaskan ke Anda' },
-                  { label: 'Deal update', desc: 'Notifikasi saat ada perubahan pada deal' },
-                  { label: 'Broadcast selesai', desc: 'Notifikasi saat broadcast selesai dikirim' },
-                ].map((item) => (
-                  <div key={item.label} className="flex items-center justify-between rounded-lg border p-3">
-                    <div>
-                      <p className="text-sm font-medium">{item.label}</p>
-                      <p className="text-xs text-muted-foreground">{item.desc}</p>
-                    </div>
-                    <input type="checkbox" defaultChecked className="h-4 w-4 rounded border-input accent-primary" />
-                  </div>
-                ))}
-              </div>
+          <NotificationPreferencesTab />
+        </TabsContent>
 
-              <div className="flex justify-end">
-                <Button>Simpan Perubahan</Button>
-              </div>
-            </CardContent>
-          </Card>
+        {/* Receipt Config Tab */}
+        <TabsContent value="receipt" className="space-y-4">
+          <ReceiptConfigTab />
         </TabsContent>
       </Tabs>
     </div>
+  );
+}
+
+/* ─── Notification Preferences Tab (extracted to avoid hooks-in-map) ─── */
+
+const NOTIF_ITEMS = [
+  { key: 'new_message' as const, label: 'Pesan masuk baru', desc: 'Notifikasi saat ada pesan WhatsApp masuk' },
+  { key: 'assigned' as const, label: 'Percakapan ditugaskan', desc: 'Notifikasi saat percakapan ditugaskan ke Anda' },
+  { key: 'deal_update' as const, label: 'Deal update', desc: 'Notifikasi saat ada perubahan pada deal' },
+  { key: 'broadcast_completed' as const, label: 'Broadcast selesai', desc: 'Notifikasi saat broadcast selesai dikirim' },
+];
+
+type NotifPrefs = Record<string, boolean>;
+
+function NotificationPreferencesTab() {
+  const queryClient = useQueryClient();
+  const [prefs, setPrefs] = useState<NotifPrefs>({
+    new_message: true,
+    assigned: true,
+    deal_update: true,
+    broadcast_completed: true,
+  });
+
+  const { data: fetchedPrefs, isLoading } = useQuery<NotifPrefs>({
+    queryKey: ['notification-preferences'],
+    queryFn: async () => {
+      const { data } = await api.get('/settings/notification-preferences');
+      return data.data;
+    },
+  });
+
+  useEffect(() => {
+    if (fetchedPrefs) setPrefs(fetchedPrefs);
+  }, [fetchedPrefs]);
+
+  const saveMutation = useMutation({
+    mutationFn: async (input: NotifPrefs) => {
+      await api.put('/settings/notification-preferences', input);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['notification-preferences'] });
+      toast.success('Pengaturan notifikasi berhasil disimpan');
+    },
+    onError: (err: any) => {
+      toast.error(err.response?.data?.error?.message || 'Gagal menyimpan');
+    },
+  });
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Pengaturan Notifikasi</CardTitle>
+        <CardDescription>Atur notifikasi yang ingin Anda terima</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {isLoading ? (
+          <div className="flex justify-center py-8">
+            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          </div>
+        ) : (
+          <>
+            <div className="space-y-4">
+              {NOTIF_ITEMS.map((item) => (
+                <div key={item.key} className="flex items-center justify-between rounded-lg border p-3">
+                  <div>
+                    <p className="text-sm font-medium">{item.label}</p>
+                    <p className="text-xs text-muted-foreground">{item.desc}</p>
+                  </div>
+                  <Switch
+                    checked={prefs[item.key] ?? true}
+                    onCheckedChange={(v) => setPrefs((p) => ({ ...p, [item.key]: v }))}
+                  />
+                </div>
+              ))}
+            </div>
+            <div className="flex justify-end">
+              <Button onClick={() => saveMutation.mutate(prefs)} disabled={saveMutation.isPending}>
+                {saveMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                Simpan Perubahan
+              </Button>
+            </div>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+/* ─── Receipt Config Tab ─── */
+function ReceiptConfigTab() {
+  const queryClient = useQueryClient();
+  const [form, setForm] = useState({
+    org_name: '',
+    org_address: '',
+    org_phone: '',
+    org_email: '',
+    primary_color: '#687EFF',
+    footer_text: '',
+    signature_name: '',
+    signature_title: '',
+  });
+
+  const { data: config, isLoading } = useQuery({
+    queryKey: ['receipt-config'],
+    queryFn: async () => {
+      const { data } = await api.get('/receipts/config');
+      return data.data;
+    },
+  });
+
+  useEffect(() => {
+    if (config) {
+      setForm({
+        org_name: config.org_name || '',
+        org_address: config.org_address || '',
+        org_phone: config.org_phone || '',
+        org_email: config.org_email || '',
+        primary_color: config.primary_color || '#687EFF',
+        footer_text: config.footer_text || '',
+        signature_name: config.signature_name || '',
+        signature_title: config.signature_title || '',
+      });
+    }
+  }, [config]);
+
+  const saveMutation = useMutation({
+    mutationFn: async (input: typeof form) => {
+      await api.put('/receipts/config', input);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['receipt-config'] });
+      toast.success('Konfigurasi kwitansi berhasil disimpan');
+    },
+    onError: (err: any) => {
+      toast.error(err.response?.data?.error?.message || 'Gagal menyimpan konfigurasi');
+    },
+  });
+
+  if (isLoading) {
+    return (
+      <div className="flex justify-center py-8">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base flex items-center gap-2">
+          <Receipt className="h-5 w-5 text-primary" />
+          Konfigurasi Kwitansi Otomatis
+        </CardTitle>
+        <CardDescription>
+          Atur branding dan informasi organisasi yang akan tampil pada PDF kwitansi yang digenerate otomatis maupun manual.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label>Nama Organisasi</Label>
+            <Input
+              placeholder="PT Contoh Indonesia"
+              value={form.org_name}
+              onChange={(e) => setForm({ ...form, org_name: e.target.value })}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Email Organisasi</Label>
+            <Input
+              type="email"
+              placeholder="info@contoh.com"
+              value={form.org_email}
+              onChange={(e) => setForm({ ...form, org_email: e.target.value })}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>No. Telepon</Label>
+            <Input
+              placeholder="021-12345678"
+              value={form.org_phone}
+              onChange={(e) => setForm({ ...form, org_phone: e.target.value })}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Warna Utama</Label>
+            <div className="flex items-center gap-2">
+              <input
+                type="color"
+                value={form.primary_color}
+                onChange={(e) => setForm({ ...form, primary_color: e.target.value })}
+                className="h-9 w-12 rounded border cursor-pointer"
+              />
+              <Input
+                value={form.primary_color}
+                onChange={(e) => setForm({ ...form, primary_color: e.target.value })}
+                className="flex-1"
+                maxLength={10}
+              />
+            </div>
+          </div>
+        </div>
+        <div className="space-y-2">
+          <Label>Alamat Organisasi</Label>
+          <Input
+            placeholder="Jl. Contoh No.1, Jakarta 12345"
+            value={form.org_address}
+            onChange={(e) => setForm({ ...form, org_address: e.target.value })}
+          />
+        </div>
+
+        <Separator />
+
+        <h4 className="text-sm font-medium">Tanda Tangan</h4>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label>Nama Penanda Tangan</Label>
+            <Input
+              placeholder="Ahmad Fauzi"
+              value={form.signature_name}
+              onChange={(e) => setForm({ ...form, signature_name: e.target.value })}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Jabatan</Label>
+            <Input
+              placeholder="Direktur Keuangan"
+              value={form.signature_title}
+              onChange={(e) => setForm({ ...form, signature_title: e.target.value })}
+            />
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <Label>Footer Text</Label>
+          <Input
+            placeholder="Terima kasih atas kepercayaan Anda"
+            value={form.footer_text}
+            onChange={(e) => setForm({ ...form, footer_text: e.target.value })}
+          />
+        </div>
+
+        <div className="flex justify-end">
+          <Button onClick={() => saveMutation.mutate(form)} disabled={saveMutation.isPending}>
+            {saveMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+            Simpan Konfigurasi
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
   );
 }

@@ -7,11 +7,26 @@ import { initSocketIO } from './socket/io';
 import { startBroadcastWorker } from './workers/broadcast.worker';
 import { startScheduledMessageWorker } from './workers/scheduled-message.worker';
 import { startExpiryWorker } from './workers/expiry.worker';
+import { startSlaWorker } from './workers/sla.worker';
+import { startTaskReminderWorker } from './workers/task-reminder.worker';
+import { startRottenDealWorker } from './workers/rotten-deal.worker';
 import { syncService } from './services/sync.service';
 
 const server = http.createServer(app);
 
 async function bootstrap(): Promise<void> {
+  // ── P185: Validate critical secrets in production ──
+  if (env.isProd) {
+    const fatal: string[] = [];
+    if (!env.JWT_SECRET || env.JWT_SECRET === 'default-secret') fatal.push('JWT_SECRET');
+    if (!env.JWT_REFRESH_SECRET || env.JWT_REFRESH_SECRET === 'default-refresh-secret') fatal.push('JWT_REFRESH_SECRET');
+    if (!env.DATABASE_URL) fatal.push('DATABASE_URL');
+    if (fatal.length > 0) {
+      console.error(`❌ FATAL: Missing required environment variables for production: ${fatal.join(', ')}`);
+      process.exit(1);
+    }
+  }
+
   // Connect to database
   await connectDatabase();
 
@@ -22,6 +37,9 @@ async function bootstrap(): Promise<void> {
   startBroadcastWorker();
   startScheduledMessageWorker();
   startExpiryWorker();
+  startSlaWorker();
+  startTaskReminderWorker();
+  startRottenDealWorker();
 
   // Start sync polling for new messages from WA API (every 2 min)
   syncService.startPolling(120_000);

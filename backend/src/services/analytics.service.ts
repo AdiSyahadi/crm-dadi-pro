@@ -1,7 +1,13 @@
 import { prisma } from '../config/database';
+import { redis } from '../config/redis';
 
 export class AnalyticsService {
   async getDashboard(organizationId: string) {
+    // Redis cache — 5 minute TTL to avoid 13 count queries on every page load
+    const cacheKey = `analytics:dashboard:${organizationId}`;
+    const cached = await redis.get(cacheKey);
+    if (cached) return JSON.parse(cached);
+
     const now = new Date();
     const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const weekStart = new Date(todayStart);
@@ -38,7 +44,7 @@ export class AnalyticsService {
       prisma.contact.count({ where: { organization_id: organizationId, created_at: { gte: weekStart } } }),
     ]);
 
-    return {
+    const result = {
       contacts: {
         total: totalContacts,
         new_today: newContactsToday,
@@ -63,41 +69,54 @@ export class AnalyticsService {
         active: activeInstances,
       },
     };
+
+    await redis.set(cacheKey, JSON.stringify(result), 'EX', 300);
+    return result;
   }
 
   async getMessageVolume(organizationId: string, days = 30) {
+    const cacheKey = `analytics:msgvol:${organizationId}:${days}`;
+    const cached = await redis.get(cacheKey);
+    if (cached) return JSON.parse(cached);
+
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - days);
 
-    const messages = await prisma.message.findMany({
+    // Use DB groupBy instead of loading all messages into memory
+    const grouped = await prisma.message.groupBy({
+      by: ['direction', 'created_at'],
       where: {
         organization_id: organizationId,
         created_at: { gte: startDate },
       },
-      select: {
-        direction: true,
-        created_at: true,
-      },
+      _count: true,
     });
 
-    // Group by date
+    // Aggregate by date
     const volumeMap = new Map<string, { incoming: number; outgoing: number }>();
-    for (const msg of messages) {
-      const dateKey = msg.created_at.toISOString().split('T')[0]!;
+    for (const row of grouped) {
+      const dateKey = row.created_at.toISOString().split('T')[0]!;
       if (!volumeMap.has(dateKey)) {
         volumeMap.set(dateKey, { incoming: 0, outgoing: 0 });
       }
       const entry = volumeMap.get(dateKey)!;
-      if (msg.direction === 'INCOMING') entry.incoming++;
-      else entry.outgoing++;
+      if (row.direction === 'INCOMING') entry.incoming += row._count;
+      else entry.outgoing += row._count;
     }
 
-    return Array.from(volumeMap.entries())
+    const result = Array.from(volumeMap.entries())
       .map(([date, data]) => ({ date, ...data, total: data.incoming + data.outgoing }))
       .sort((a, b) => a.date.localeCompare(b.date));
+
+    await redis.set(cacheKey, JSON.stringify(result), 'EX', 300);
+    return result;
   }
 
   async getAgentPerformance(organizationId: string) {
+    const cacheKey = `analytics:agents:${organizationId}`;
+    const cached = await redis.get(cacheKey);
+    if (cached) return JSON.parse(cached);
+
     const agents = await prisma.user.findMany({
       where: { organization_id: organizationId, is_active: true },
       select: {
@@ -128,37 +147,46 @@ export class AnalyticsService {
       })
     );
 
+    await redis.set(cacheKey, JSON.stringify(performance), 'EX', 120);
     return performance;
   }
 
   async getContactGrowth(organizationId: string, days = 30) {
+    const cacheKey = `analytics:growth:${organizationId}:${days}`;
+    const cached = await redis.get(cacheKey);
+    if (cached) return JSON.parse(cached);
+
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - days);
 
-    const contacts = await prisma.contact.findMany({
-      where: {
-        organization_id: organizationId,
-        created_at: { gte: startDate },
-      },
-      select: { created_at: true, source: true },
-    });
+    const [dailyGroups, sourceGroups] = await Promise.all([
+      prisma.contact.groupBy({
+        by: ['created_at'],
+        where: { organization_id: organizationId, created_at: { gte: startDate } },
+        _count: { id: true },
+      }),
+      prisma.contact.groupBy({
+        by: ['source'],
+        where: { organization_id: organizationId, created_at: { gte: startDate } },
+        _count: { id: true },
+      }),
+    ]);
 
-    const growthMap = new Map<string, number>();
-    const sourceMap = new Map<string, number>();
-
-    for (const contact of contacts) {
-      const dateKey = contact.created_at.toISOString().split('T')[0]!;
-      growthMap.set(dateKey, (growthMap.get(dateKey) || 0) + 1);
-      sourceMap.set(contact.source, (sourceMap.get(contact.source) || 0) + 1);
+    const dailyMap = new Map<string, number>();
+    for (const g of dailyGroups) {
+      const dateKey = g.created_at.toISOString().split('T')[0]!;
+      dailyMap.set(dateKey, (dailyMap.get(dateKey) || 0) + g._count.id);
     }
 
-    return {
-      daily: Array.from(growthMap.entries())
+    const result = {
+      daily: Array.from(dailyMap.entries())
         .map(([date, count]) => ({ date, count }))
         .sort((a, b) => a.date.localeCompare(b.date)),
-      by_source: Array.from(sourceMap.entries())
-        .map(([source, count]) => ({ source, count })),
+      by_source: sourceGroups.map((g) => ({ source: g.source, count: g._count.id })),
     };
+
+    await redis.set(cacheKey, JSON.stringify(result), 'EX', 300);
+    return result;
   }
 }
 

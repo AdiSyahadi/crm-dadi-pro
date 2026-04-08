@@ -11,5 +11,9 @@ router.get('/wa-api', settingsController.getWaApiConfig.bind(settingsController)
 router.put('/wa-api', settingsController.updateWaApiConfig.bind(settingsController));
 router.post('/wa-api/test', settingsController.testWaApiConnection.bind(settingsController));
 router.patch('/organization', settingsController.updateOrganization.bind(settingsController));
+router.get('/notification-preferences', settingsController.getNotificationPreferences.bind(settingsController));
+router.put('/notification-preferences', settingsController.updateNotificationPreferences.bind(settingsController));
+router.get('/rotten-deals', settingsController.getRottenDealSettings.bind(settingsController));
+router.put('/rotten-deals', settingsController.updateRottenDealSettings.bind(settingsController));
 
 export default router;

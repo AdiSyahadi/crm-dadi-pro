@@ -1,4 +1,5 @@
 import { prisma } from '../config/database';
+import { redis } from '../config/redis';
 import { WAApiClient } from './wa-api.client';
 import { templateService } from './template.service';
 
@@ -42,21 +43,19 @@ export class AutoResponseEngine {
         const shouldFire = this._shouldFire(rule, params);
         if (!shouldFire) continue;
 
-        // Check cooldown — use a simple approach: check last outgoing auto-response message
-        // within cooldown window by looking at messages with a specific marker
-        const cooldownCutoff = new Date(Date.now() - rule.cooldown_minutes * 60 * 1000);
-        const recentAutoReply = await prisma.message.findFirst({
-          where: {
-            conversation_id: params.conversationId,
-            direction: 'OUTGOING',
-            content: { startsWith: rule.template.content.slice(0, 50) },
-            created_at: { gte: cooldownCutoff },
-          },
-        });
-        if (recentAutoReply) continue; // Still in cooldown
+        // Check cooldown via Redis TTL key — survives restarts, no fragile content matching
+        const cooldownKey = `auto_response:${params.organizationId}:${params.contactId}:${rule.trigger}`;
+        const inCooldown = await redis.exists(cooldownKey);
+        if (inCooldown) continue;
 
         // Send the auto-response
         await this._send(params, rule);
+
+        // Set cooldown in Redis (TTL = cooldown_minutes)
+        const cooldownSeconds = rule.cooldown_minutes * 60;
+        if (cooldownSeconds > 0) {
+          await redis.set(cooldownKey, '1', 'EX', cooldownSeconds);
+        }
 
         // Increment template usage
         await templateService.incrementUsage(params.organizationId, rule.template_id).catch(() => {});

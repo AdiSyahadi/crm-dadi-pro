@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '@/lib/api';
+import { useConfirmStore } from '@/stores/confirm.store';
 import { FeatureGate } from '@/components/feature-gate';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -49,6 +50,7 @@ const statusConfig: Record<string, { label: string; color: string }> = {
 
 export default function BroadcastsPage() {
   const queryClient = useQueryClient();
+  const openConfirm = useConfirmStore((s) => s.openConfirm);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [contactSearch, setContactSearch] = useState('');
 
@@ -102,7 +104,9 @@ export default function BroadcastsPage() {
     setFormMessage('');
     setFormTagIds([]);
     setFormSelectedContacts([]);
+    setSelectedContactsMap({});
     setContactSearch('');
+    setDebouncedSearch('');
     setFormTemplateId('');
     clearFormMedia();
   };
@@ -117,15 +121,43 @@ export default function BroadcastsPage() {
   });
   const instances = instancesData?.data || [];
 
-  // Fetch contacts for recipient selection
+  // Debounce contact search for server-side filtering
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const handleContactSearch = (value: string) => {
+    setContactSearch(value);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => setDebouncedSearch(value), 300);
+  };
+
+  // Fetch contacts with server-side search (max 200)
   const { data: contactsData } = useQuery({
-    queryKey: ['contacts-all'],
+    queryKey: ['contacts-broadcast', debouncedSearch],
     queryFn: async () => {
-      const { data } = await api.get('/contacts?limit=100');
+      const params = new URLSearchParams({ limit: '200' });
+      if (debouncedSearch) params.set('search', debouncedSearch);
+      const { data } = await api.get(`/contacts?${params}`);
       return data;
     },
   });
-  const allContacts = contactsData?.data || [];
+  const searchedContacts = contactsData?.data || [];
+
+  // Maintain a map of selected contacts info for display
+  const [selectedContactsMap, setSelectedContactsMap] = useState<Record<string, { id: string; name: string; phone_number: string }>>({});
+
+  // Merge searched contacts into map for display purposes
+  const displayContacts = useMemo(() => {
+    const map = new Map<string, any>();
+    // Add selected contacts first (so they always show)
+    for (const c of Object.values(selectedContactsMap)) {
+      map.set(c.id, c);
+    }
+    // Add search results
+    for (const c of searchedContacts) {
+      map.set(c.id, c);
+    }
+    return Array.from(map.values());
+  }, [searchedContacts, selectedContactsMap]);
 
   // Fetch tags for tag-based recipient selection
   const { data: tagsData } = useQuery({
@@ -148,9 +180,36 @@ export default function BroadcastsPage() {
   });
   const activeTemplates = templatesData || [];
 
-  const filteredContacts = allContacts.filter((c: any) =>
-    !contactSearch || c.name?.toLowerCase().includes(contactSearch.toLowerCase()) || c.phone_number?.includes(contactSearch)
-  );
+  const toggleContact = (contact: any) => {
+    const id = contact.id;
+    setFormSelectedContacts((prev) => {
+      if (prev.includes(id)) {
+        setSelectedContactsMap((m) => { const copy = { ...m }; delete copy[id]; return copy; });
+        return prev.filter((c) => c !== id);
+      } else {
+        setSelectedContactsMap((m) => ({ ...m, [id]: { id: contact.id, name: contact.name, phone_number: contact.phone_number } }));
+        return [...prev, id];
+      }
+    });
+  };
+
+  const selectAllFiltered = () => {
+    const map: Record<string, any> = {};
+    for (const c of searchedContacts) {
+      map[c.id] = { id: c.id, name: c.name, phone_number: c.phone_number };
+    }
+    setSelectedContactsMap((m) => ({ ...m, ...map }));
+    setFormSelectedContacts((prev) => {
+      const set = new Set(prev);
+      searchedContacts.forEach((c: any) => set.add(c.id));
+      return Array.from(set);
+    });
+  };
+
+  const deselectAll = () => {
+    setFormSelectedContacts([]);
+    setSelectedContactsMap({});
+  };
 
   const { data, isLoading } = useQuery({
     queryKey: ['broadcasts'],
@@ -209,22 +268,6 @@ export default function BroadcastsPage() {
     onError: (err: any) => toast.error(err.response?.data?.error?.message || err.message || 'Gagal membuat broadcast'),
   });
 
-  const toggleContact = (id: string) => {
-    setFormSelectedContacts((prev) =>
-      prev.includes(id) ? prev.filter((c) => c !== id) : [...prev, id]
-    );
-  };
-
-  const selectAllFiltered = () => {
-    const ids = filteredContacts.map((c: any) => c.id);
-    setFormSelectedContacts((prev) => {
-      const set = new Set(prev);
-      ids.forEach((id: string) => set.add(id));
-      return Array.from(set);
-    });
-  };
-
-  const deselectAll = () => setFormSelectedContacts([]);
 
   const startMutation = useMutation({
     mutationFn: async (id: string) => { await api.post(`/broadcasts/${id}/start`); },
@@ -417,19 +460,19 @@ export default function BroadcastsPage() {
               </div>
               <div className="relative">
                 <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                <Input placeholder="Cari kontak..." className="pl-8" value={contactSearch} onChange={(e) => setContactSearch(e.target.value)} />
+                <Input placeholder="Cari kontak..." className="pl-8" value={contactSearch} onChange={(e) => handleContactSearch(e.target.value)} />
               </div>
               <ScrollArea className="h-[200px] rounded-md border p-2">
-                {filteredContacts.length === 0 ? (
+                {displayContacts.length === 0 ? (
                   <p className="text-sm text-muted-foreground text-center py-4">Tidak ada kontak</p>
                 ) : (
-                  filteredContacts.map((contact: any) => (
+                  displayContacts.map((contact: any) => (
                     <label key={contact.id} className="flex items-center gap-3 py-1.5 px-1 rounded hover:bg-muted/50 cursor-pointer">
                       <input
                         type="checkbox"
                         className="h-4 w-4 rounded border-gray-300 accent-primary"
                         checked={formSelectedContacts.includes(contact.id)}
-                        onChange={() => toggleContact(contact.id)}
+                        onChange={() => toggleContact(contact)}
                       />
                       <div className="min-w-0">
                         <p className="text-sm font-medium truncate">{contact.name || 'Tanpa Nama'}</p>
@@ -603,11 +646,7 @@ export default function BroadcastsPage() {
                               variant="ghost"
                               size="icon"
                               className="h-7 w-7 text-red-600"
-                              onClick={() => {
-                                if (confirm('Hapus broadcast ini? Tindakan ini tidak bisa dibatalkan.')) {
-                                  deleteMutation.mutate(bc.id);
-                                }
-                              }}
+                              onClick={() => openConfirm({ title: 'Hapus broadcast ini?', description: 'Tindakan ini tidak bisa dibatalkan.', onConfirm: () => deleteMutation.mutate(bc.id) })}
                               title="Hapus"
                             >
                               <Trash2 className="h-3.5 w-3.5" />

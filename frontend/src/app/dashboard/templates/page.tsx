@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '@/lib/api';
+import { useConfirmStore } from '@/stores/confirm.store';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -22,7 +23,9 @@ import { cn } from '@/lib/utils';
 
 export default function TemplatesPage() {
   const queryClient = useQueryClient();
+  const openConfirm = useConfirmStore((s) => s.openConfirm);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState({ name: '', category: '', content: '' });
 
   const { data, isLoading } = useQuery({
@@ -47,6 +50,43 @@ export default function TemplatesPage() {
     },
     onError: (err: any) => toast.error(err.response?.data?.error?.message || 'Gagal'),
   });
+
+  const updateMutation = useMutation({
+    mutationFn: async ({ id, input }: { id: string; input: typeof form }) => {
+      await api.patch(`/templates/${id}`, input);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['templates'] });
+      setDialogOpen(false);
+      setEditingId(null);
+      setForm({ name: '', category: '', content: '' });
+      toast.success('Template berhasil diperbarui');
+    },
+    onError: (err: any) => toast.error(err.response?.data?.error?.message || 'Gagal'),
+  });
+
+  const isSaving = createMutation.isPending || updateMutation.isPending;
+
+  const openCreateDialog = () => {
+    setEditingId(null);
+    setForm({ name: '', category: '', content: '' });
+    setDialogOpen(true);
+  };
+
+  const openEditDialog = (tpl: any) => {
+    setEditingId(tpl.id);
+    setForm({ name: tpl.name, category: tpl.category || '', content: tpl.content });
+    setDialogOpen(true);
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (editingId) {
+      updateMutation.mutate({ id: editingId, input: form });
+    } else {
+      createMutation.mutate(form);
+    }
+  };
 
   const toggleMutation = useMutation({
     mutationFn: async (id: string) => {
@@ -75,22 +115,19 @@ export default function TemplatesPage() {
           <h1 className="text-2xl font-bold">Template Pesan</h1>
           <p className="text-sm text-muted-foreground">Kelola template pesan untuk broadcast dan quick reply</p>
         </div>
-        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <Dialog open={dialogOpen} onOpenChange={(open) => { setDialogOpen(open); if (!open) { setEditingId(null); setForm({ name: '', category: '', content: '' }); } }}>
           <DialogTrigger asChild>
-            <Button>
+            <Button onClick={openCreateDialog}>
               <Plus className="h-4 w-4 mr-2" />
               Buat Template
             </Button>
           </DialogTrigger>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Buat Template Baru</DialogTitle>
+              <DialogTitle>{editingId ? 'Edit Template' : 'Buat Template Baru'}</DialogTitle>
             </DialogHeader>
             <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                createMutation.mutate(form);
-              }}
+              onSubmit={handleSubmit}
               className="space-y-4"
             >
               <div className="space-y-2">
@@ -121,9 +158,9 @@ export default function TemplatesPage() {
                 />
                 <p className="text-xs text-muted-foreground">Gunakan {"{{variable}}"} untuk variabel dinamis</p>
               </div>
-              <Button type="submit" className="w-full" disabled={createMutation.isPending}>
-                {createMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-                Simpan Template
+              <Button type="submit" className="w-full" disabled={isSaving}>
+                {isSaving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                {editingId ? 'Simpan Perubahan' : 'Simpan Template'}
               </Button>
             </form>
           </DialogContent>
@@ -175,6 +212,14 @@ export default function TemplatesPage() {
                       variant="ghost"
                       size="icon"
                       className="h-7 w-7"
+                      onClick={() => openEditDialog(tpl)}
+                    >
+                      <Edit className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7"
                       onClick={() => toggleMutation.mutate(tpl.id)}
                     >
                       {tpl.is_active ? (
@@ -187,9 +232,7 @@ export default function TemplatesPage() {
                       variant="ghost"
                       size="icon"
                       className="h-7 w-7 text-destructive"
-                      onClick={() => {
-                        if (confirm('Hapus template ini?')) deleteMutation.mutate(tpl.id);
-                      }}
+                      onClick={() => openConfirm({ title: 'Hapus template ini?', description: 'Template akan dihapus permanen.', onConfirm: () => deleteMutation.mutate(tpl.id) })}
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </Button>

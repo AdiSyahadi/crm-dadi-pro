@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '@/lib/api';
+import { useConfirmStore } from '@/stores/confirm.store';
 import { FeatureGate } from '@/components/feature-gate';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -34,9 +35,11 @@ import {
   DollarSign,
   GripVertical,
   User,
+  AlertTriangle,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import { DealDetailDialog } from '@/components/deal-detail-dialog';
 
 const STAGES = [
   { key: 'QUALIFICATION', label: 'Kualifikasi', color: 'bg-blue-500' },
@@ -59,13 +62,39 @@ interface Deal {
   assigned_to: { id: string; name: string } | null;
   closed_status: string | null;
   created_at: string;
+  updated_at: string;
 }
 
 export default function DealsPage() {
   const queryClient = useQueryClient();
+  const openConfirm = useConfirmStore((s) => s.openConfirm);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState({ title: '', value: '', contact_id: '', source: 'manual' });
   const [view, setView] = useState<'pipeline' | 'list'>('pipeline');
+  const [detailDealId, setDetailDealId] = useState<string | null>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
+
+  const openDealDetail = (id: string) => {
+    setDetailDealId(id);
+    setDetailOpen(true);
+  };
+
+  const { data: rottenSettings } = useQuery({
+    queryKey: ['rotten-deal-settings'],
+    queryFn: async () => {
+      const { data } = await api.get('/settings/rotten-deals');
+      return data.data as { rotten_deal_days: number };
+    },
+  });
+
+  const rottenDays = rottenSettings?.rotten_deal_days ?? 7;
+
+  const isRotten = (deal: Deal) => {
+    if (rottenDays <= 0) return false;
+    if (deal.closed_status) return false;
+    const daysSince = (Date.now() - new Date(deal.updated_at).getTime()) / (1000 * 60 * 60 * 24);
+    return daysSince >= rottenDays;
+  };
 
   const { data: deals = [], isLoading } = useQuery({
     queryKey: ['deals'],
@@ -83,21 +112,12 @@ export default function DealsPage() {
     },
   });
 
-  const { data: report } = useQuery({
-    queryKey: ['deal-report'],
-    queryFn: async () => {
-      const { data } = await api.get('/deals/report');
-      return data.data;
-    },
-  });
-
   const createMutation = useMutation({
     mutationFn: async (input: any) => {
       await api.post('/deals', { ...input, value: Number(input.value) });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['deals'] });
-      queryClient.invalidateQueries({ queryKey: ['deal-report'] });
       setDialogOpen(false);
       setForm({ title: '', value: '', contact_id: '', source: 'manual' });
       toast.success('Deal berhasil dibuat');
@@ -123,7 +143,6 @@ export default function DealsPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['deals'] });
-      queryClient.invalidateQueries({ queryKey: ['deal-report'] });
       toast.success('Deal ditandai WON!');
     },
   });
@@ -134,7 +153,6 @@ export default function DealsPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['deals'] });
-      queryClient.invalidateQueries({ queryKey: ['deal-report'] });
       toast.success('Deal ditandai LOST');
     },
   });
@@ -316,11 +334,14 @@ export default function DealsPage() {
                   <ScrollArea className="max-h-[500px]">
                     <div className="space-y-2">
                       {stageDeals.map((deal) => (
-                        <Card key={deal.id} className="cursor-pointer hover:shadow-md transition-shadow">
+                        <Card key={deal.id} className={cn('cursor-pointer hover:shadow-md transition-shadow', isRotten(deal) && 'border-amber-400 bg-amber-50/50')} onClick={() => openDealDetail(deal.id)}>
                           <CardContent className="p-3">
                             <div className="flex items-start justify-between mb-2">
                               <div className="flex-1 min-w-0">
-                                <p className="text-sm font-medium truncate">{deal.title}</p>
+                                <div className="flex items-center gap-1">
+                                  <p className="text-sm font-medium truncate">{deal.title}</p>
+                                  {isRotten(deal) && <AlertTriangle className="h-3.5 w-3.5 text-amber-500 shrink-0" />}
+                                </div>
                                 <p className="text-[10px] text-muted-foreground">{deal.deal_number}</p>
                               </div>
                               <GripVertical className="h-4 w-4 text-muted-foreground/30 shrink-0" />
@@ -329,7 +350,7 @@ export default function DealsPage() {
                             {deal.contact && (
                               <p className="text-xs text-muted-foreground mt-1">{deal.contact.name}</p>
                             )}
-                            <div className="flex items-center gap-1 mt-2">
+                            <div className="flex items-center gap-1 mt-2" onClick={(e) => e.stopPropagation()}>
                               {/* Stage navigation buttons */}
                               {stage.key !== 'QUALIFICATION' && (
                                 <Button
@@ -370,7 +391,7 @@ export default function DealsPage() {
                                     variant="ghost"
                                     size="sm"
                                     className="h-6 text-[10px] px-2 text-red-600"
-                                    onClick={() => markLostMutation.mutate(deal.id)}
+                                    onClick={() => openConfirm({ title: 'Tandai deal ini sebagai Lost?', description: 'Deal akan ditandai sebagai kalah/gagal.', confirmText: 'Ya, Lost', onConfirm: () => markLostMutation.mutate(deal.id) })}
                                   >
                                     ✗ Lost
                                   </Button>
@@ -398,9 +419,10 @@ export default function DealsPage() {
           <CardContent className="p-0">
             <div className="divide-y">
               {deals.map((deal) => (
-                <div key={deal.id} className="flex items-center gap-4 p-4 hover:bg-muted/30 transition-colors">
+                <div key={deal.id} className={cn('flex items-center gap-4 p-4 hover:bg-muted/30 transition-colors cursor-pointer', isRotten(deal) && 'bg-amber-50/50')} onClick={() => openDealDetail(deal.id)}>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
+                      {isRotten(deal) && <AlertTriangle className="h-3.5 w-3.5 text-amber-500 shrink-0" />}
                       <p className="text-sm font-medium">{deal.title}</p>
                       <Badge variant="outline" className="text-[10px]">{deal.deal_number}</Badge>
                     </div>
@@ -427,6 +449,12 @@ export default function DealsPage() {
         </Card>
       )}
     </div>
+
+    <DealDetailDialog
+      open={detailOpen}
+      onOpenChange={setDetailOpen}
+      dealId={detailDealId}
+    />
     </FeatureGate>
   );
 }

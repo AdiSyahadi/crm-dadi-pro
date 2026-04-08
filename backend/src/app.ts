@@ -8,6 +8,7 @@ import path from 'path';
 import { env } from './config/env';
 import { errorHandler } from './middleware/error-handler';
 import routes from './routes';
+import { trackedLinkService } from './services/tracked-link.service';
 
 const app = express();
 
@@ -58,6 +59,20 @@ app.use(compression());
 
 // Serve uploaded files (payment proofs, etc.)
 app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
+
+// Public tracked link redirect (no auth)
+app.get('/t/:code', async (req, res) => {
+  try {
+    const redirectUrl = await trackedLinkService.recordClick(req.params.code as string);
+    if (!redirectUrl) {
+      res.status(404).send('Link not found or expired');
+      return;
+    }
+    res.redirect(302, redirectUrl);
+  } catch {
+    res.status(500).send('Internal server error');
+  }
+});
 
 // API Routes
 app.use('/api', routes);

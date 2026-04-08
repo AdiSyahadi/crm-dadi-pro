@@ -4,6 +4,7 @@ import { useState, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api, { API_BASE_URL } from '@/lib/api';
 import { useAuthStore } from '@/stores/auth.store';
+import { useConfirmStore } from '@/stores/confirm.store';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -85,6 +86,7 @@ function resolveProofUrl(url: string | null): string {
 
 export default function BillingPage() {
   const user = useAuthStore((s) => s.user);
+  const openConfirm = useConfirmStore((s) => s.openConfirm);
   const queryClient = useQueryClient();
   const [uploadInvoice, setUploadInvoice] = useState<Invoice | null>(null);
   const [proofFile, setProofFile] = useState<File | null>(null);
@@ -377,9 +379,7 @@ export default function BillingPage() {
                           className="text-xs text-destructive hover:text-destructive"
                           disabled={cancelInvoiceMutation.isPending}
                           onClick={() => {
-                            if (confirm('Yakin ingin membatalkan invoice ini?')) {
-                              cancelInvoiceMutation.mutate(inv.id);
-                            }
+                            openConfirm({ title: 'Batalkan invoice ini?', description: 'Invoice akan dibatalkan dan tidak bisa dibayar lagi.', confirmText: 'Ya, Batalkan', onConfirm: () => cancelInvoiceMutation.mutate(inv.id) });
                           }}
                         >
                           <Ban className="h-3.5 w-3.5 mr-1" />

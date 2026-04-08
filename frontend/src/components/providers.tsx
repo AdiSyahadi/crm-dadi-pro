@@ -6,6 +6,17 @@ import { ThemeProvider } from 'next-themes';
 import { Toaster } from '@/components/ui/sonner';
 import { useEffect, useState } from 'react';
 import { useAuthStore } from '@/stores/auth.store';
+import { useConfirmStore } from '@/stores/confirm.store';
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogCancel,
+  AlertDialogAction,
+} from '@/components/ui/alert-dialog';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -81,8 +92,33 @@ export function Providers({ children }: { children: React.ReactNode }) {
             {children}
           </AuthInitializer>
           <Toaster position="top-right" richColors />
+          <GlobalConfirmDialog />
         </QueryClientProvider>
       </ThemeProvider>
     </ErrorBoundary>
+  );
+}
+
+function GlobalConfirmDialog() {
+  const { open, title, description, confirmText, variant, onConfirm, closeConfirm } = useConfirmStore();
+
+  return (
+    <AlertDialog open={open} onOpenChange={(v) => { if (!v) closeConfirm(); }}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{title}</AlertDialogTitle>
+          <AlertDialogDescription>{description}</AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel onClick={closeConfirm}>Batal</AlertDialogCancel>
+          <AlertDialogAction
+            className={variant === 'destructive' ? 'bg-destructive text-destructive-foreground hover:bg-destructive/90' : ''}
+            onClick={() => { onConfirm(); closeConfirm(); }}
+          >
+            {confirmText}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }

@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '@/lib/api';
+import { useConfirmStore } from '@/stores/confirm.store';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -72,6 +73,7 @@ const emptyForm = {
 
 export function WebhookSettings() {
   const queryClient = useQueryClient();
+  const openConfirm = useConfirmStore((s) => s.openConfirm);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState(emptyForm);
@@ -318,11 +320,7 @@ export function WebhookSettings() {
                         variant="ghost"
                         size="icon"
                         className="h-8 w-8 text-destructive hover:text-destructive"
-                        onClick={() => {
-                          if (confirm(`Hapus webhook "${wh.name}"?`)) {
-                            deleteMutation.mutate(wh.id);
-                          }
-                        }}
+                        onClick={() => openConfirm({ title: `Hapus webhook "${wh.name}"?`, description: 'Webhook akan dihapus permanen.', onConfirm: () => deleteMutation.mutate(wh.id) })}
                         title="Hapus"
                       >
                         <Trash2 className="h-4 w-4" />

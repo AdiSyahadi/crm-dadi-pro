@@ -97,7 +97,7 @@ export class TeamController {
   async resetPassword(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const { password } = req.body;
-      await teamService.resetPassword(req.user!.organizationId, req.params.userId as string, password);
+      await teamService.resetPassword(req.user!.organizationId, req.params.userId as string, password, req.user!.role);
       sendSuccess(res, null, 'Password berhasil direset');
     } catch (error) {
       next(error);

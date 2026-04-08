@@ -55,6 +55,15 @@ import {
   Trash2,
   Ban,
   Pencil,
+  AlertCircle,
+  StickyNote,
+  Zap,
+  Eye,
+  CheckSquare,
+  Square,
+  Bookmark,
+  BookmarkCheck,
+  Star,
 } from 'lucide-react';
 import {
   Dialog,
@@ -64,6 +73,11 @@ import {
 } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import { formatWAText } from '@/lib/format-wa-text';
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
 import data from '@emoji-mart/data';
@@ -89,10 +103,12 @@ interface Message {
   caption: string | null;
   media_url: string | null;
   status: string;
+  error_message?: string | null;
   created_at: string;
   sent_by_user: { id: string; name: string } | null;
   is_edited?: boolean;
   edited_at?: string | null;
+  is_internal_note?: boolean;
 }
 
 export default function ChatPage() {
@@ -113,6 +129,8 @@ export default function ChatPage() {
   const [isUploading, setIsUploading] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [assignDialogOpen, setAssignDialogOpen] = useState(false);
+  const [assignSearch, setAssignSearch] = useState('');
+  const [transferNote, setTransferNote] = useState('');
   const [slashIndex, setSlashIndex] = useState(0);
   const emojiPickerRef = useRef<HTMLDivElement>(null);
   const slashMenuRef = useRef<HTMLDivElement>(null);
@@ -122,6 +140,12 @@ export default function ChatPage() {
   const [showFormatBar, setShowFormatBar] = useState(false);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editText, setEditText] = useState('');
+  const [isNoteMode, setIsNoteMode] = useState(false);
+  const [viewers, setViewers] = useState<{ userId: string; userName: string }[]>([]);
+  const [bulkMode, setBulkMode] = useState(false);
+  const [bulkSelected, setBulkSelected] = useState<Set<string>>(new Set());
+  const [saveFilterName, setSaveFilterName] = useState('');
+  const [saveFilterOpen, setSaveFilterOpen] = useState(false);
 
   // Detect text selection in textarea
   const handleTextSelect = useCallback(() => {
@@ -263,12 +287,12 @@ export default function ChatPage() {
     staleTime: 30_000,
   });
 
-  // Fetch active templates for slash-command quick reply
-  const { data: slashTemplates = [] } = useQuery({
-    queryKey: ['templates-active'],
+  // Fetch quick replies for slash-command
+  const { data: slashQuickReplies = [] } = useQuery({
+    queryKey: ['quick-replies'],
     queryFn: async () => {
-      const { data } = await api.get('/templates?is_active=true&limit=50');
-      return (data.data || []) as { id: string; name: string; category: string | null; content: string; media_url: string | null; media_type: string | null }[];
+      const { data } = await api.get('/quick-replies');
+      return (data.data || []) as { id: string; shortcut: string; title: string; content: string; category: string | null; media_url: string | null; media_type: string | null }[];
     },
     staleTime: 60_000,
   });
@@ -319,11 +343,15 @@ export default function ChatPage() {
   // Assign conversation mutation
   const assignMutation = useMutation({
     mutationFn: async ({ convId, userId }: { convId: string; userId: string | null }) => {
-      await api.post(`/conversations/${convId}/assign`, { user_id: userId });
+      await api.post(`/conversations/${convId}/assign`, {
+        user_id: userId,
+        transfer_note: transferNote.trim() || undefined,
+      });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['conversations'] });
       setAssignDialogOpen(false);
+      setTransferNote('');
       toast.success('Percakapan berhasil ditugaskan');
     },
     onError: (err: any) => toast.error(err?.response?.data?.error?.message || 'Gagal menugaskan'),
@@ -341,6 +369,67 @@ export default function ChatPage() {
     onError: (err: any) => toast.error(err?.response?.data?.error?.message || 'Gagal membuka percakapan'),
   });
 
+  // Bulk action mutations
+  const bulkResolveMutation = useMutation({
+    mutationFn: async () => {
+      await api.post('/conversations/bulk/resolve', { conversation_ids: Array.from(bulkSelected) });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['conversations'] });
+      setBulkSelected(new Set());
+      setBulkMode(false);
+      toast.success('Percakapan berhasil ditutup massal');
+    },
+    onError: () => toast.error('Gagal menutup percakapan massal'),
+  });
+
+  const bulkReopenMutation = useMutation({
+    mutationFn: async () => {
+      await api.post('/conversations/bulk/reopen', { conversation_ids: Array.from(bulkSelected) });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['conversations'] });
+      setBulkSelected(new Set());
+      setBulkMode(false);
+      toast.success('Percakapan berhasil dibuka kembali massal');
+    },
+    onError: () => toast.error('Gagal membuka percakapan massal'),
+  });
+
+  // Saved filters
+  const { data: savedFilters = [] } = useQuery({
+    queryKey: ['saved-filters', 'conversation'],
+    queryFn: async () => { const { data } = await api.get('/saved-filters?entity=conversation'); return data.data; },
+  });
+
+  const saveFilterMutation = useMutation({
+    mutationFn: async (name: string) => {
+      await api.post('/saved-filters', {
+        name,
+        entity: 'conversation',
+        filters: { chatFilter, agentFilter, labelFilter },
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['saved-filters'] });
+      setSaveFilterName('');
+      setSaveFilterOpen(false);
+      toast.success('Filter berhasil disimpan');
+    },
+    onError: () => toast.error('Gagal menyimpan filter'),
+  });
+
+  const deleteFilterMutation = useMutation({
+    mutationFn: async (id: string) => { await api.delete(`/saved-filters/${id}`); },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['saved-filters'] }); toast.success('Filter dihapus'); },
+  });
+
+  const applyFilter = (filters: any) => {
+    if (filters.chatFilter) setChatFilter(filters.chatFilter);
+    if (filters.agentFilter !== undefined) setAgentFilter(filters.agentFilter);
+    if (filters.labelFilter !== undefined) setLabelFilter(filters.labelFilter);
+  };
+
   // Send message mutation
   const sendMutation = useMutation({
     mutationFn: async (payload: { content?: string; media_url?: string; media_type?: string; caption?: string }) => {
@@ -357,7 +446,7 @@ export default function ChatPage() {
       }
     },
     onError: (err: any) => {
-      toast.error(err?.response?.data?.message || 'Gagal mengirim pesan');
+      toast.error(err?.response?.data?.error?.message || 'Gagal mengirim pesan');
     },
   });
 
@@ -372,7 +461,7 @@ export default function ChatPage() {
       toast.success('Pesan berhasil dihapus');
     },
     onError: (err: any) => {
-      toast.error(err?.response?.data?.message || 'Gagal menghapus pesan');
+      toast.error(err?.response?.data?.error?.message || 'Gagal menghapus pesan');
     },
   });
 
@@ -389,7 +478,23 @@ export default function ChatPage() {
       toast.success('Pesan berhasil diedit');
     },
     onError: (err: any) => {
-      toast.error(err?.response?.data?.message || 'Gagal mengedit pesan');
+      toast.error(err?.response?.data?.error?.message || 'Gagal mengedit pesan');
+    },
+  });
+
+  // Internal note mutation
+  const addNoteMutation = useMutation({
+    mutationFn: async (content: string) => {
+      const { data } = await api.post(`/conversations/${selectedId}/internal-note`, { content });
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['messages', selectedId] });
+      queryClient.invalidateQueries({ queryKey: ['conversations'] });
+      setMessageText('');
+    },
+    onError: (err: any) => {
+      toast.error(err?.response?.data?.error?.message || 'Gagal menambah catatan');
     },
   });
 
@@ -442,44 +547,116 @@ export default function ChatPage() {
       }
     }
 
-    const handleChatMessage = (data: any) => {
-      queryClient.invalidateQueries({ queryKey: ['conversations'] });
-      const convId = data.conversation?.id || data.conversation_id;
-      if (convId === selectedIdRef.current) {
-        queryClient.invalidateQueries({ queryKey: ['messages', selectedIdRef.current] });
+    const handleChatMessage = (payload: any) => {
+      const incomingMsg: Message | undefined = payload.message;
+      const incomingConv: Conversation | undefined = payload.conversation;
+      const convId = incomingConv?.id || payload.conversation_id;
+
+      // 1. Instantly append message to the active conversation's message cache
+      if (convId && incomingMsg) {
+        queryClient.setQueryData<Message[]>(['messages', convId], (old) => {
+          if (!old) return old;
+          // Dedup: avoid adding if message already exists
+          if (old.some((m) => m.id === incomingMsg.id)) return old;
+          return [...old, incomingMsg];
+        });
+      }
+
+      // 2. Instantly update conversation list cache (all matching query keys)
+      queryClient.setQueriesData<Conversation[]>(
+        { queryKey: ['conversations'] },
+        (old) => {
+          if (!old || !incomingConv) return old;
+          const preview = incomingMsg?.content || incomingMsg?.caption || `[${incomingMsg?.message_type || 'TEXT'}]`;
+          const timestamp = incomingMsg?.created_at || new Date().toISOString();
+          const idx = old.findIndex((c) => c.id === convId);
+          if (idx >= 0) {
+            // Update existing conversation in-place, then move to top
+            const updated = { ...old[idx],
+              last_message_preview: preview,
+              last_message_at: timestamp,
+              unread_count: convId === selectedIdRef.current
+                ? old[idx].unread_count
+                : old[idx].unread_count + (incomingMsg?.direction === 'INCOMING' ? 1 : 0),
+            };
+            const next = [updated, ...old.filter((_, i) => i !== idx)];
+            return next;
+          }
+          // New conversation not in list yet — prepend it
+          return [incomingConv, ...old];
+        },
+      );
+    };
+
+    const handleMessageStatus = (payload: any) => {
+      const { message_id, conversation_id, status } = payload;
+      if (!message_id || !status) return;
+
+      // Instantly update message status in cache
+      if (conversation_id) {
+        queryClient.setQueryData<Message[]>(['messages', conversation_id], (old) => {
+          if (!old) return old;
+          return old.map((m) =>
+            m.id === message_id ? { ...m, status } : m
+          );
+        });
       }
     };
 
-    const handleMessageStatus = (data: any) => {
-      queryClient.invalidateQueries({ queryKey: ['conversations'] });
-      if (data.conversation_id === selectedIdRef.current) {
-        queryClient.invalidateQueries({ queryKey: ['messages', selectedIdRef.current] });
-      }
+    const handleConversationUpdated = (payload: any) => {
+      const conv: Conversation | undefined = payload.conversation;
+      if (!conv) return;
+      queryClient.setQueriesData<Conversation[]>(
+        { queryKey: ['conversations'] },
+        (old) => {
+          if (!old) return old;
+          return old.map((c) => c.id === conv.id ? { ...c, ...conv } : c);
+        },
+      );
     };
 
     socket.on('chat:message', handleChatMessage);
     socket.on('message:status', handleMessageStatus);
+    socket.on('conversation:updated', handleConversationUpdated);
 
     return () => {
       socket.off('chat:message', handleChatMessage);
       socket.off('message:status', handleMessageStatus);
+      socket.off('conversation:updated', handleConversationUpdated);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [queryClient]);
 
-  // Join conversation room + mark as read
+  // Join conversation room + mark as read + notify viewing
   useEffect(() => {
     if (!selectedId) return;
     const socket = getSocket();
     socket.emit('conversation:join', selectedId);
+    socket.emit('conversation:viewing', selectedId);
     // Mark conversation as read when opened
     api.post(`/conversations/${selectedId}/read`).then(() => {
       queryClient.invalidateQueries({ queryKey: ['conversations'] });
     }).catch(() => {});
     return () => {
       socket.emit('conversation:leave', selectedId);
+      socket.emit('conversation:stop-viewing');
+      setViewers([]);
     };
   }, [selectedId, queryClient]);
+
+  // Listen for conversation viewers (collision detection)
+  useEffect(() => {
+    const socket = getSocket();
+    const handleViewers = (data: { conversationId: string; viewers: { userId: string; userName: string }[] }) => {
+      if (data.conversationId === selectedId) {
+        setViewers(data.viewers.filter((v) => v.userId !== user?.id));
+      }
+    };
+    socket.on('conversation:viewers', handleViewers);
+    return () => {
+      socket.off('conversation:viewers', handleViewers);
+    };
+  }, [selectedId, user?.id]);
 
   // Auto scroll to bottom — use setTimeout to wait for DOM render,
   // and scroll the ScrollArea viewport directly for reliability.
@@ -492,6 +669,13 @@ export default function ChatPage() {
   const handleSend = useCallback(async () => {
     if (!selectedId) return;
     if (!messageText.trim() && !attachedFile) return;
+
+    // Internal note mode: send as internal note, not to WhatsApp
+    if (isNoteMode) {
+      if (!messageText.trim()) return;
+      addNoteMutation.mutate(messageText.trim());
+      return;
+    }
 
     if (attachedFile) {
       setIsUploading(true);
@@ -511,22 +695,24 @@ export default function ChatPage() {
           caption: messageText.trim() || undefined,
         });
       } catch (err: any) {
-        toast.error(err?.response?.data?.message || err.message || 'Gagal upload file');
+        toast.error(err?.response?.data?.error?.message || err.message || 'Gagal upload file');
       } finally {
         setIsUploading(false);
       }
     } else {
       sendMutation.mutate({ content: messageText.trim() });
     }
-  }, [messageText, selectedId, sendMutation, attachedFile]);
+  }, [messageText, selectedId, sendMutation, attachedFile, isNoteMode, addNoteMutation]);
 
   // Slash command: derived values
-  const slashActive = messageText.startsWith('/') && !attachedFile;
+  const slashActive = messageText.startsWith('/') && !attachedFile && !isNoteMode;
   const slashFilter = slashActive ? messageText.slice(1).toLowerCase() : '';
   const slashFiltered = slashActive
-    ? slashTemplates.filter((t: any) =>
-        t.name.toLowerCase().includes(slashFilter) ||
-        (t.category || '').toLowerCase().includes(slashFilter)
+    ? slashQuickReplies.filter((t: any) =>
+        t.shortcut.toLowerCase().includes(slashFilter) ||
+        t.title.toLowerCase().includes(slashFilter) ||
+        (t.category || '').toLowerCase().includes(slashFilter) ||
+        t.content.toLowerCase().includes(slashFilter)
       ).slice(0, 8)
     : [];
 
@@ -542,8 +728,8 @@ export default function ChatPage() {
         .replace(/\{\{phone\}\}/gi, contactPhone);
     }
     setMessageText(text);
-    // Record template usage (fire-and-forget)
-    api.post(`/templates/${tpl.id}/use`).catch(() => {});
+    // Record quick reply usage (fire-and-forget)
+    api.post(`/quick-replies/${tpl.id}/use`).catch(() => {});
   }, [selectedConv]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -600,6 +786,7 @@ export default function ChatPage() {
       case 'SENT': return <Check className="h-3 w-3 text-muted-foreground" />;
       case 'DELIVERED': return <CheckCheck className="h-3 w-3 text-muted-foreground" />;
       case 'READ': return <CheckCheck className="h-3 w-3 text-blue-500" />;
+      case 'FAILED': return <AlertCircle className="h-3 w-3 text-red-500" />;
       default: return <Clock className="h-3 w-3 text-muted-foreground" />;
     }
   };
@@ -653,43 +840,75 @@ export default function ChatPage() {
         'w-full md:w-[340px] lg:w-[380px] flex flex-col border-r',
         mobileShowChat && 'hidden md:flex'
       )}>
-        {/* Search */}
+        {/* Search + Bulk Toggle */}
         <div className="p-3 border-b">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="Cari percakapan..."
-              className="pl-9 bg-muted/50 border-0"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
+          <div className="flex items-center gap-2">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Cari percakapan..."
+                className="pl-9 bg-muted/50 border-0"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+            </div>
+            {!isAgent && (
+              <Button
+                variant={bulkMode ? 'default' : 'ghost'}
+                size="icon"
+                className="h-9 w-9 shrink-0"
+                onClick={() => { setBulkMode(!bulkMode); setBulkSelected(new Set()); }}
+                title="Mode seleksi massal"
+              >
+                <CheckSquare className="h-4 w-4" />
+              </Button>
+            )}
           </div>
-          {/* Filter tabs — hidden for AGENT (backend enforces own-chats-only) */}
-          {!isAgent && (
-            <div className="space-y-2 mt-2">
-              <div className="flex gap-1">
-                {([
-                  { key: 'all', label: 'Semua' },
-                  { key: 'mine', label: 'Chat Saya' },
-                  { key: 'unassigned', label: 'Belum Ditugaskan' },
-                ] as const).map((f) => (
-                  <button
-                    key={f.key}
-                    type="button"
-                    className={cn(
-                      'flex-1 text-[11px] font-medium py-1.5 rounded-md transition-colors',
-                      chatFilter === f.key && !agentFilter
-                        ? 'bg-primary text-primary-foreground'
-                        : 'bg-muted/50 text-muted-foreground hover:bg-muted'
-                    )}
-                    onClick={() => { setChatFilter(f.key); setAgentFilter(''); }}
-                  >
-                    {f.label}
-                  </button>
-                ))}
-              </div>
-              {/* Agent filter dropdown */}
-              <Select value={agentFilter} onValueChange={(v) => { setAgentFilter(v === '__all__' ? '' : v); if (v && v !== '__all__') setChatFilter('all'); }}>
+          {/* Bulk action bar */}
+          {bulkMode && bulkSelected.size > 0 && (
+            <div className="flex items-center gap-2 mt-2 p-2 rounded-lg bg-primary/10">
+              <span className="text-xs font-medium">{bulkSelected.size} dipilih</span>
+              <div className="flex-1" />
+              <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => bulkResolveMutation.mutate()} disabled={bulkResolveMutation.isPending}>
+                <CheckCircle className="h-3 w-3 mr-1" /> Tutup
+              </Button>
+              <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => bulkReopenMutation.mutate()} disabled={bulkReopenMutation.isPending}>
+                <RotateCcw className="h-3 w-3 mr-1" /> Buka
+              </Button>
+            </div>
+          )}
+          {/* Filter tabs */}
+          <div className="space-y-2 mt-2">
+            <div className="flex gap-1">
+              {(isAgent
+                ? ([
+                    { key: 'mine', label: 'Chat Saya' },
+                    { key: 'unassigned', label: 'Belum Ditugaskan' },
+                  ] as const)
+                : ([
+                    { key: 'all', label: 'Semua' },
+                    { key: 'mine', label: 'Chat Saya' },
+                    { key: 'unassigned', label: 'Belum Ditugaskan' },
+                  ] as const)
+              ).map((f) => (
+                <button
+                  key={f.key}
+                  type="button"
+                  className={cn(
+                    'flex-1 text-[11px] font-medium py-1.5 rounded-md transition-colors',
+                    chatFilter === f.key && !agentFilter
+                      ? 'bg-primary text-primary-foreground'
+                      : 'bg-muted/50 text-muted-foreground hover:bg-muted'
+                  )}
+                  onClick={() => { setChatFilter(f.key); setAgentFilter(''); }}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
+            {/* Agent filter dropdown — management only */}
+            {!isAgent && (
+            <Select value={agentFilter} onValueChange={(v) => { setAgentFilter(v === '__all__' ? '' : v); if (v && v !== '__all__') setChatFilter('all'); }}>
                 <SelectTrigger className="h-8 text-xs">
                   <SelectValue placeholder="Filter by Agent..." />
                 </SelectTrigger>
@@ -702,8 +921,8 @@ export default function ChatPage() {
                   ))}
                 </SelectContent>
               </Select>
-            </div>
-          )}
+            )}
+          </div>
           {/* Label filter — all roles, sourced from /conversations/labels endpoint */}
           {availableLabels.length > 0 && (
             <div className="mt-2">
@@ -721,6 +940,46 @@ export default function ChatPage() {
               </Select>
             </div>
           )}
+          {/* Saved filters */}
+          <div className="mt-2 flex items-center gap-1">
+            <Popover open={saveFilterOpen} onOpenChange={setSaveFilterOpen}>
+              <PopoverTrigger asChild>
+                <button type="button" className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors">
+                  <Bookmark className="h-3 w-3" /> Filter Tersimpan
+                </button>
+              </PopoverTrigger>
+              <PopoverContent className="w-64 p-2" align="start">
+                <div className="space-y-1 max-h-48 overflow-y-auto">
+                  {savedFilters.length === 0 && (
+                    <p className="text-xs text-muted-foreground text-center py-2">Belum ada filter tersimpan</p>
+                  )}
+                  {savedFilters.map((sf: any) => (
+                    <div key={sf.id} className="flex items-center justify-between group">
+                      <button type="button" className="flex-1 text-left text-xs px-2 py-1.5 rounded hover:bg-muted truncate" onClick={() => { applyFilter(sf.filters); setSaveFilterOpen(false); }}>
+                        <BookmarkCheck className="h-3 w-3 inline mr-1 text-primary" />{sf.name}
+                      </button>
+                      <button type="button" className="opacity-0 group-hover:opacity-100 p-1 text-muted-foreground hover:text-destructive" onClick={() => deleteFilterMutation.mutate(sf.id)}>
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                <Separator className="my-2" />
+                <div className="flex gap-1">
+                  <Input
+                    value={saveFilterName}
+                    onChange={(e) => setSaveFilterName(e.target.value)}
+                    placeholder="Nama filter..."
+                    className="h-7 text-xs flex-1"
+                    onKeyDown={(e) => { if (e.key === 'Enter' && saveFilterName.trim()) saveFilterMutation.mutate(saveFilterName.trim()); }}
+                  />
+                  <Button size="sm" className="h-7 text-xs px-2" disabled={!saveFilterName.trim() || saveFilterMutation.isPending} onClick={() => saveFilterMutation.mutate(saveFilterName.trim())}>
+                    Simpan
+                  </Button>
+                </div>
+              </PopoverContent>
+            </Popover>
+          </div>
         </div>
 
         {/* Conversation items */}
@@ -744,13 +1003,28 @@ export default function ChatPage() {
                 key={conv.id}
                 className={cn(
                   'flex items-center gap-3 px-3 py-3 cursor-pointer hover:bg-muted/50 transition-colors border-b border-border/50',
-                  selectedId === conv.id && 'bg-primary/5 border-l-2 border-l-primary'
+                  selectedId === conv.id && 'bg-primary/5 border-l-2 border-l-primary',
+                  bulkMode && bulkSelected.has(conv.id) && 'bg-primary/10'
                 )}
                 onClick={() => {
-                  setSelectedId(conv.id);
-                  setMobileShowChat(true);
+                  if (bulkMode) {
+                    setBulkSelected((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(conv.id)) next.delete(conv.id);
+                      else next.add(conv.id);
+                      return next;
+                    });
+                  } else {
+                    setSelectedId(conv.id);
+                    setMobileShowChat(true);
+                  }
                 }}
               >
+                {bulkMode && (
+                  bulkSelected.has(conv.id)
+                    ? <CheckSquare className="h-4 w-4 text-primary shrink-0" />
+                    : <Square className="h-4 w-4 text-muted-foreground shrink-0" />
+                )}
                 <Avatar className="h-10 w-10 shrink-0">
                   <AvatarFallback className="bg-primary/10 text-primary text-xs font-semibold">
                     {initials(getDisplayName(conv))}
@@ -767,11 +1041,19 @@ export default function ChatPage() {
                     <p className="text-xs text-muted-foreground truncate max-w-[200px]">
                       {conv.last_message_preview || 'Belum ada pesan'}
                     </p>
-                    {conv.unread_count > 0 && (
-                      <Badge className="h-5 min-w-[20px] flex items-center justify-center rounded-full text-[10px] bg-primary">
-                        {conv.unread_count}
-                      </Badge>
-                    )}
+                    <div className="flex items-center gap-1 shrink-0">
+                      {conv.assigned_to_user && (
+                        <span className="inline-flex h-5 items-center gap-0.5 rounded bg-muted px-1.5 text-[10px] text-muted-foreground">
+                          <User className="h-2.5 w-2.5" />
+                          {conv.assigned_to_user.name.split(' ')[0]}
+                        </span>
+                      )}
+                      {conv.unread_count > 0 && (
+                        <Badge className="h-5 min-w-[20px] flex items-center justify-center rounded-full text-[10px] bg-primary">
+                          {conv.unread_count}
+                        </Badge>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -815,6 +1097,12 @@ export default function ChatPage() {
                 <p className="text-xs text-muted-foreground">{selectedConv ? getDisplayPhone(selectedConv) : ''}</p>
               </div>
               <div className="flex items-center gap-1">
+                {viewers.length > 0 && (
+                  <Badge variant="outline" className="text-[10px] gap-1 border-amber-400 text-amber-600 bg-amber-50">
+                    <Eye className="h-3 w-3" />
+                    {viewers.map((v) => v.userName.split(' ')[0]).join(', ')} sedang melihat
+                  </Badge>
+                )}
                 {selectedConv?.assigned_to_user && (
                   <Badge variant="outline" className="text-[10px] gap-1">
                     <User className="h-3 w-3" />
@@ -858,6 +1146,7 @@ export default function ChatPage() {
               <div className="space-y-3 max-w-3xl mx-auto">
                 {messages.filter((msg) => msg.content || msg.media_url || msg.message_type !== 'TEXT').map((msg) => {
                   const isOutgoing = msg.direction === 'OUTGOING';
+                  const isInternalNote = !!msg.is_internal_note;
                   const isDeleted = msg.status === 'DELETED';
                   const canEdit = isOutgoing && !isDeleted && !['AUDIO', 'STICKER'].includes(msg.message_type)
                     && (Date.now() - new Date(msg.created_at).getTime()) < 15 * 60 * 1000;
@@ -915,11 +1204,18 @@ export default function ChatPage() {
                         'max-w-[75%] rounded-2xl px-4 py-2.5 text-sm',
                         isDeleted
                           ? 'bg-muted/50 border border-dashed border-muted-foreground/30'
-                          : isOutgoing
-                            ? 'bg-primary text-primary-foreground rounded-br-md'
-                            : 'bg-muted rounded-bl-md'
+                          : isInternalNote
+                            ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-900 dark:text-amber-100 border border-amber-300 dark:border-amber-700 rounded-br-md'
+                            : isOutgoing
+                              ? 'bg-primary text-primary-foreground rounded-br-md'
+                              : 'bg-muted rounded-bl-md'
                       )}
                     >
+                      {isInternalNote && !isDeleted && (
+                        <p className="text-[10px] font-semibold uppercase tracking-wider mb-1 flex items-center gap-1 text-amber-600 dark:text-amber-400">
+                          <StickyNote className="h-3 w-3" /> Catatan Internal
+                        </p>
+                      )}
                       {isDeleted ? (
                         <p className="italic text-muted-foreground flex items-center gap-1.5">
                           <Ban className="h-3.5 w-3.5" />
@@ -1034,6 +1330,9 @@ export default function ChatPage() {
                         )}
                         {isOutgoing && !isDeleted && getStatusIcon(msg.status)}
                       </div>
+                      {msg.status === 'FAILED' && isOutgoing && (
+                        <p className="text-[10px] text-red-400 mt-0.5">{msg.error_message || 'Gagal terkirim'}</p>
+                      )}
                     </div>
 
                     {/* Delete dropdown - after bubble for incoming */}
@@ -1094,10 +1393,19 @@ export default function ChatPage() {
                 onChange={handleFileSelect}
               />
               <div className="flex items-end gap-2 max-w-3xl mx-auto">
-                <Button variant="ghost" size="icon" className="h-9 w-9 shrink-0 mb-0.5" onClick={() => fileInputRef.current?.click()} disabled={isUploading}>
+                <Button
+                  variant={isNoteMode ? 'default' : 'ghost'}
+                  size="icon"
+                  className={cn('h-9 w-9 shrink-0 mb-0.5', isNoteMode && 'bg-amber-500 hover:bg-amber-600 text-white')}
+                  onClick={() => setIsNoteMode((v) => !v)}
+                  title={isNoteMode ? 'Mode Catatan Internal (aktif)' : 'Catatan Internal'}
+                >
+                  <StickyNote className="h-4 w-4" />
+                </Button>
+                <Button variant="ghost" size="icon" className="h-9 w-9 shrink-0 mb-0.5" onClick={() => fileInputRef.current?.click()} disabled={isUploading || isNoteMode}>
                   <Paperclip className="h-4 w-4" />
                 </Button>
-                <div className="flex-1 relative rounded-md bg-muted/50">
+                <div className={cn('flex-1 relative rounded-md', isNoteMode ? 'bg-amber-50 dark:bg-amber-950/30 ring-1 ring-amber-400' : 'bg-muted/50')}>
                   {/* WhatsApp-style floating format toolbar */}
                   {showFormatBar && (
                     <div
@@ -1133,7 +1441,7 @@ export default function ChatPage() {
                     style={{ minHeight: '38px', maxHeight: '150px' }}
                   >
                     {messageText ? formatWAText(messageText) : (
-                      <span className="text-muted-foreground">Ketik pesan...</span>
+                      <span className="text-muted-foreground">{isNoteMode ? 'Tulis catatan internal...' : 'Ketik pesan...'}</span>
                     )}
                   </div>
                   <textarea
@@ -1157,9 +1465,11 @@ export default function ChatPage() {
                   >
                     <Smile className="h-4 w-4 text-muted-foreground" />
                   </Button>
-                  {/* Slash command template popup */}
-                  {slashActive && slashFiltered.length > 0 && (
+                  {/* Slash command quick reply popup */}
+                  {slashActive && (
                     <div ref={slashMenuRef} className="absolute bottom-12 left-0 z-50 w-full max-h-56 overflow-y-auto rounded-lg border bg-popover shadow-lg">
+                      {slashFiltered.length > 0 ? (
+                        <>
                       {slashFiltered.map((tpl: any, idx: number) => (
                         <button
                           key={tpl.id}
@@ -1171,8 +1481,9 @@ export default function ChatPage() {
                           onMouseDown={(e) => { e.preventDefault(); selectSlashTemplate(tpl); }}
                         >
                           <div className="flex items-center gap-2">
-                            <FileText className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                            <span className="font-medium truncate text-xs">{tpl.name}</span>
+                            <Zap className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+                            <span className="font-medium truncate text-xs">/{tpl.shortcut}</span>
+                            <span className="text-[11px] text-muted-foreground truncate">{tpl.title}</span>
                             {tpl.category && (
                               <Badge variant="outline" className="text-[10px] shrink-0">{tpl.category}</Badge>
                             )}
@@ -1183,6 +1494,12 @@ export default function ChatPage() {
                       <div className="px-3 py-1.5 border-t text-[10px] text-muted-foreground">
                         <kbd className="px-1 py-0.5 bg-muted rounded text-[9px]">↑↓</kbd> navigasi · <kbd className="px-1 py-0.5 bg-muted rounded text-[9px]">Enter</kbd> pilih · <kbd className="px-1 py-0.5 bg-muted rounded text-[9px]">Esc</kbd> tutup
                       </div>
+                        </>
+                      ) : (
+                        <div className="px-3 py-3 text-sm text-muted-foreground text-center">
+                          Tidak ada quick reply yang cocok
+                        </div>
+                      )}
                     </div>
                   )}
                   {showEmojiPicker && (
@@ -1195,9 +1512,9 @@ export default function ChatPage() {
                   size="icon"
                   className="h-9 w-9 shrink-0 mb-0.5"
                   onClick={handleSend}
-                  disabled={(!messageText.trim() && !attachedFile) || sendMutation.isPending || isUploading}
+                  disabled={(!messageText.trim() && !attachedFile) || sendMutation.isPending || addNoteMutation.isPending || isUploading}
                 >
-                  {isUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                  {isUploading || addNoteMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                 </Button>
               </div>
             </div>
@@ -1205,15 +1522,29 @@ export default function ChatPage() {
         )}
       </div>
       {/* Assign Dialog */}
-      <Dialog open={assignDialogOpen} onOpenChange={setAssignDialogOpen}>
+      <Dialog open={assignDialogOpen} onOpenChange={(o) => { setAssignDialogOpen(o); if (!o) { setAssignSearch(''); setTransferNote(''); } }}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <UserCog className="h-5 w-5" /> Tugaskan Percakapan
             </DialogTitle>
           </DialogHeader>
+          <Input
+            placeholder="Cari nama agent..."
+            value={assignSearch}
+            onChange={(e) => setAssignSearch(e.target.value)}
+            className="h-9"
+            autoFocus
+          />
+          <textarea
+            placeholder="Catatan transfer (opsional)..."
+            value={transferNote}
+            onChange={(e) => setTransferNote(e.target.value)}
+            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-none min-h-[60px]"
+          />
           <div className="space-y-2 max-h-[400px] overflow-y-auto">
             {/* Unassign option */}
+            {!assignSearch && (
             <button
               type="button"
               className={cn(
@@ -1231,8 +1562,14 @@ export default function ChatPage() {
                 <p className="text-xs text-muted-foreground">Lepas dari semua CS</p>
               </div>
             </button>
+            )}
             {/* User list */}
-            {(teamUsers as any[]).filter((u: any) => u.is_active).map((u: any) => (
+            {(teamUsers as any[])
+              .filter((u: any) => u.is_active)
+              .filter((u: any) => !assignSearch || u.name?.toLowerCase().includes(assignSearch.toLowerCase()))
+              .map((u: any) => {
+              const workload = conversations.filter((c) => c.assigned_to_user?.id === u.id).length;
+              return (
               <button
                 key={u.id}
                 type="button"
@@ -1250,11 +1587,12 @@ export default function ChatPage() {
                 </Avatar>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium truncate">{u.name}</p>
-                  <p className="text-xs text-muted-foreground">{u.role}</p>
+                  <p className="text-xs text-muted-foreground">{u.role} · {workload} chat aktif</p>
                 </div>
                 <span className={cn('h-2 w-2 rounded-full shrink-0', u.is_online ? 'bg-emerald-500' : 'bg-muted-foreground/30')} />
               </button>
-            ))}
+              );
+            })}
           </div>
         </DialogContent>
       </Dialog>

@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useAuthStore } from '@/stores/auth.store';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '@/lib/api';
+import { useConfirmStore } from '@/stores/confirm.store';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -45,6 +46,7 @@ const roleColors: Record<string, string> = {
 
 export default function TeamPage() {
   const queryClient = useQueryClient();
+  const openConfirm = useConfirmStore((s) => s.openConfirm);
   const userRole = useAuthStore((s) => s.user?.role);
   const isAdmin = userRole === 'OWNER' || userRole === 'ADMIN';
   const currentUserId = useAuthStore((s) => s.user?.id);
@@ -294,9 +296,7 @@ export default function TeamPage() {
                               const roles = ['ADMIN', 'SUPERVISOR', 'AGENT'];
                               const currentIdx = roles.indexOf(user.role);
                               const nextRole = roles[(currentIdx + 1) % roles.length];
-                              if (confirm(`Ubah role ${user.name} dari ${user.role} ke ${nextRole}?`)) {
-                                updateUserMutation.mutate({ userId: user.id, data: { role: nextRole } });
-                              }
+                              openConfirm({ title: `Ubah role ${user.name}?`, description: `Role akan diubah dari ${user.role} ke ${nextRole}.`, confirmText: 'Ya, Ubah', variant: 'default', onConfirm: () => updateUserMutation.mutate({ userId: user.id, data: { role: nextRole } }) });
                             }}>
                               <ShieldCheck className="h-3.5 w-3.5 mr-2" />
                               Ubah Role → {['ADMIN', 'SUPERVISOR', 'AGENT'][((['ADMIN', 'SUPERVISOR', 'AGENT'].indexOf(user.role)) + 1) % 3]}
@@ -310,10 +310,8 @@ export default function TeamPage() {
                             </DropdownMenuItem>
                             <DropdownMenuSeparator />
                             <DropdownMenuItem className="text-xs" onClick={() => {
-                              const action = user.is_active ? 'nonaktifkan' : 'aktifkan';
-                              if (confirm(`${action} akun ${user.name}?`)) {
-                                updateUserMutation.mutate({ userId: user.id, data: { is_active: !user.is_active } });
-                              }
+                              const action = user.is_active ? 'Nonaktifkan' : 'Aktifkan';
+                              openConfirm({ title: `${action} akun ${user.name}?`, description: user.is_active ? 'User tidak bisa login setelah dinonaktifkan.' : 'User akan bisa login kembali.', confirmText: `Ya, ${action}`, variant: user.is_active ? 'destructive' : 'default', onConfirm: () => updateUserMutation.mutate({ userId: user.id, data: { is_active: !user.is_active } }) });
                             }}>
                               {user.is_active ? (
                                 <><UserX className="h-3.5 w-3.5 mr-2 text-destructive" /><span className="text-destructive">Nonaktifkan</span></>
@@ -416,7 +414,7 @@ export default function TeamPage() {
                         size="icon"
                         className="h-7 w-7 text-destructive"
                         onClick={() => {
-                          if (confirm('Hapus tim ini?')) deleteTeamMutation.mutate(team.id);
+                          openConfirm({ title: 'Hapus tim ini?', description: 'Tim akan dihapus, anggota tidak akan terpengaruh.', onConfirm: () => deleteTeamMutation.mutate(team.id) });
                         }}
                       >
                         <Trash2 className="h-3.5 w-3.5" />

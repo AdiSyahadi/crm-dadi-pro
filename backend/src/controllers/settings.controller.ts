@@ -165,6 +165,87 @@ export class SettingsController {
       next(error);
     }
   }
+
+  // GET /api/settings/notification-preferences
+  async getNotificationPreferences(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const user = await prisma.user.findUnique({
+        where: { id: req.user!.userId },
+        select: { notification_settings: true },
+      });
+
+      const defaults = {
+        new_message: true,
+        assigned: true,
+        deal_update: true,
+        broadcast_completed: true,
+      };
+
+      sendSuccess(res, { ...(defaults), ...((user?.notification_settings as any) || {}) });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // PUT /api/settings/notification-preferences
+  async updateNotificationPreferences(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const schema = z.object({
+        new_message: z.boolean().optional(),
+        assigned: z.boolean().optional(),
+        deal_update: z.boolean().optional(),
+        broadcast_completed: z.boolean().optional(),
+      });
+
+      const parsed = schema.parse(req.body);
+
+      await prisma.user.update({
+        where: { id: req.user!.userId },
+        data: { notification_settings: parsed },
+      });
+
+      sendSuccess(res, parsed, 'Pengaturan notifikasi berhasil disimpan');
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // GET /api/settings/rotten-deals
+  async getRottenDealSettings(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const org = await prisma.organization.findUnique({
+        where: { id: req.user!.organizationId },
+        select: { settings: true },
+      });
+      const settings = (org?.settings as Record<string, any>) || {};
+      sendSuccess(res, { rotten_deal_days: settings.rotten_deal_days ?? 7 });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // PUT /api/settings/rotten-deals
+  async updateRottenDealSettings(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const schema = z.object({ rotten_deal_days: z.number().int().min(0).max(90) });
+      const { rotten_deal_days } = schema.parse(req.body);
+
+      const org = await prisma.organization.findUnique({
+        where: { id: req.user!.organizationId },
+        select: { settings: true },
+      });
+      const current = (org?.settings as Record<string, any>) || {};
+
+      await prisma.organization.update({
+        where: { id: req.user!.organizationId },
+        data: { settings: { ...current, rotten_deal_days } },
+      });
+
+      sendSuccess(res, { rotten_deal_days }, 'Pengaturan rotten deal berhasil disimpan');
+    } catch (error) {
+      next(error);
+    }
+  }
 }
 
 export const settingsController = new SettingsController();

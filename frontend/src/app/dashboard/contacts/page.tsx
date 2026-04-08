@@ -1,8 +1,10 @@
 'use client';
 
 import { useState, useRef } from 'react';
+import { useRouter } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '@/lib/api';
+import { useConfirmStore } from '@/stores/confirm.store';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -31,9 +33,11 @@ import {
 } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { Card, CardContent } from '@/components/ui/card';
-import { Search, Plus, Users, Phone, Building2, Loader2, Trash2, Edit, Tag, X, Tags, Upload, Download, FileSpreadsheet, AlertCircle, CheckCircle } from 'lucide-react';
+import { Search, Plus, Users, Phone, Building2, Loader2, Trash2, Edit, Tag, X, Tags, Upload, Download, FileSpreadsheet, AlertCircle, CheckCircle, StickyNote, Send, GitMerge, Zap } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
+import { Textarea } from '@/components/ui/textarea';
+import { ScrollArea } from '@/components/ui/scroll-area';
 
 const LABEL_COLORS = [
   { name: 'Biru', value: '#3b82f6' },
@@ -64,12 +68,15 @@ interface Contact {
   stage: string;
   tags: { id: string; name: string; color: string }[];
   total_messages: number;
+  lead_score: number;
   created_at: string;
 }
 
 export default function ContactsPage() {
   const queryClient = useQueryClient();
-  const [activeTab, setActiveTab] = useState<'contacts' | 'labels'>('contacts');
+  const router = useRouter();
+  const openConfirm = useConfirmStore((s) => s.openConfirm);
+  const [activeTab, setActiveTab] = useState<'contacts' | 'labels' | 'duplicates'>('contacts');
 
   // Contact state
   const [search, setSearch] = useState('');
@@ -97,6 +104,16 @@ export default function ContactsPage() {
   const [importError, setImportError] = useState('');
   const csvInputRef = useRef<HTMLInputElement>(null);
 
+  // Notes state
+  const [notesContactId, setNotesContactId] = useState<string | null>(null);
+  const [notesContactName, setNotesContactName] = useState('');
+  const [newNote, setNewNote] = useState('');
+
+  // Merge state
+  const [mergeSourceId, setMergeSourceId] = useState<string | null>(null);
+  const [mergeTargetId, setMergeTargetId] = useState<string>('');
+  const [mergeSearch, setMergeSearch] = useState('');
+
   // Queries
   const { data, isLoading } = useQuery({
     queryKey: ['contacts', search, page, filterTag],
@@ -117,6 +134,19 @@ export default function ContactsPage() {
       const { data } = await api.get('/contacts/tags');
       return (data.data || []) as TagItem[];
     },
+  });
+
+  const { data: duplicates = [], isLoading: dupLoading } = useQuery({
+    queryKey: ['contact-duplicates'],
+    queryFn: async () => {
+      const { data } = await api.get('/contacts/duplicates');
+      return data.data as Array<{
+        match_type: string;
+        match_value: string;
+        contacts: Array<{ id: string; name: string | null; phone_number: string; email: string | null; total_messages: number; created_at: string; _count: { conversations: number; deals: number } }>;
+      }>;
+    },
+    enabled: activeTab === 'duplicates',
   });
 
   // Contact mutations
@@ -154,6 +184,52 @@ export default function ContactsPage() {
       queryClient.invalidateQueries({ queryKey: ['contacts'] });
       toast.success('Kontak dihapus');
     },
+  });
+
+  const mergeMutation = useMutation({
+    mutationFn: async ({ target_id, source_id }: { target_id: string; source_id: string }) => {
+      await api.post('/contacts/merge', { target_id, source_id });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['contacts'] });
+      setMergeSourceId(null);
+      setMergeTargetId('');
+      setMergeSearch('');
+      toast.success('Kontak berhasil digabung');
+    },
+    onError: (err: any) => toast.error(err.response?.data?.error?.message || 'Gagal merge kontak'),
+  });
+
+  // Notes queries & mutations
+  const { data: notesData = [], isLoading: notesLoading } = useQuery({
+    queryKey: ['contact-notes', notesContactId],
+    queryFn: async () => {
+      const { data } = await api.get(`/contacts/${notesContactId}/notes`);
+      return data.data || [];
+    },
+    enabled: !!notesContactId,
+  });
+
+  const createNoteMutation = useMutation({
+    mutationFn: async (content: string) => {
+      await api.post(`/contacts/${notesContactId}/notes`, { content });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['contact-notes', notesContactId] });
+      setNewNote('');
+    },
+    onError: (err: any) => toast.error(err.response?.data?.error?.message || 'Gagal menambah catatan'),
+  });
+
+  const deleteNoteMutation = useMutation({
+    mutationFn: async (noteId: string) => {
+      await api.delete(`/contacts/${notesContactId}/notes/${noteId}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['contact-notes', notesContactId] });
+      toast.success('Catatan dihapus');
+    },
+    onError: (err: any) => toast.error(err.response?.data?.error?.message || 'Gagal menghapus catatan'),
   });
 
   // Label mutations
@@ -222,9 +298,28 @@ export default function ContactsPage() {
       queryClient.invalidateQueries({ queryKey: ['tags'] });
       setImportDialogOpen(false);
       resetImport();
-      toast.success(`Import selesai: ${result.created} ditambahkan, ${result.skipped} dilewati`);
+      const lines = [`✅ ${result.created} kontak berhasil ditambahkan`, `⏭️ ${result.skipped} dilewati (sudah ada)`];
+      if (result.errors?.length > 0) {
+        lines.push(`❌ ${result.errors.length} gagal:`);
+        result.errors.slice(0, 5).forEach((e: any) => lines.push(`  • ${e.phone_number}: ${e.reason}`));
+        if (result.errors.length > 5) lines.push(`  ... dan ${result.errors.length - 5} lainnya`);
+      }
+      toast.success(lines.join('\n'), { duration: 8000, style: { whiteSpace: 'pre-line' } });
     },
     onError: (err: any) => toast.error(err.response?.data?.error?.message || 'Gagal import kontak'),
+  });
+
+  // Lead score recalc
+  const recalcScoreMutation = useMutation({
+    mutationFn: async () => {
+      const { data } = await api.post('/contacts/lead-score/recalc-all');
+      return data.data as { updated: number };
+    },
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ['contacts'] });
+      toast.success(`Skor ${result.updated} kontak berhasil dihitung ulang`);
+    },
+    onError: (err: any) => toast.error(err.response?.data?.error?.message || 'Gagal menghitung skor'),
   });
 
   // Helpers
@@ -310,6 +405,27 @@ export default function ContactsPage() {
     a.download = 'template_import_kontak.csv';
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  const [isExporting, setIsExporting] = useState(false);
+
+  const exportContacts = async () => {
+    setIsExporting(true);
+    try {
+      const { data } = await api.get('/contacts/export', { responseType: 'blob' });
+      const blob = new Blob([data], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `kontak_${format(new Date(), 'yyyy-MM-dd')}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success('Kontak berhasil di-export');
+    } catch {
+      toast.error('Gagal export kontak');
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   const handleImportSubmit = () => {
@@ -410,6 +526,12 @@ export default function ContactsPage() {
         <div className="flex gap-2">
           {activeTab === 'contacts' && (
             <>
+              <Button variant="outline" size="sm" onClick={() => recalcScoreMutation.mutate()} disabled={recalcScoreMutation.isPending}>
+                {recalcScoreMutation.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Zap className="h-4 w-4 mr-2" />} Hitung Skor
+              </Button>
+              <Button variant="outline" onClick={exportContacts} disabled={isExporting}>
+                {isExporting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Download className="h-4 w-4 mr-2" />} Export CSV
+              </Button>
               <Button variant="outline" onClick={() => { resetImport(); setImportDialogOpen(true); }}>
                 <Upload className="h-4 w-4 mr-2" /> Import CSV
               </Button>
@@ -443,6 +565,14 @@ export default function ContactsPage() {
           onClick={() => setActiveTab('labels')}
         >
           <Tags className="h-4 w-4 inline mr-1.5" />Label ({tags.length})
+        </button>
+        <button
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            activeTab === 'duplicates' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'
+          }`}
+          onClick={() => setActiveTab('duplicates')}
+        >
+          <GitMerge className="h-4 w-4 inline mr-1.5" />Duplikat
         </button>
       </div>
 
@@ -557,6 +687,7 @@ export default function ContactsPage() {
                     <TableHead className="hidden md:table-cell">Telepon</TableHead>
                     <TableHead>Label</TableHead>
                     <TableHead className="hidden lg:table-cell">Stage</TableHead>
+                    <TableHead className="hidden lg:table-cell">Skor</TableHead>
                     <TableHead className="hidden lg:table-cell">Dibuat</TableHead>
                     <TableHead className="w-[80px]"></TableHead>
                   </TableRow>
@@ -564,7 +695,7 @@ export default function ContactsPage() {
                 <TableBody>
                   {isLoading ? (
                     <TableRow>
-                      <TableCell colSpan={7} className="text-center py-12">
+                      <TableCell colSpan={8} className="text-center py-12">
                         <Loader2 className="h-6 w-6 animate-spin mx-auto text-muted-foreground" />
                       </TableCell>
                     </TableRow>
@@ -593,7 +724,12 @@ export default function ContactsPage() {
                               </AvatarFallback>
                             </Avatar>
                             <div>
-                              <p className="text-sm font-medium">{contact.name}</p>
+                              <button
+                                className="text-sm font-medium hover:underline text-left"
+                                onClick={() => router.push(`/dashboard/contacts/${contact.id}`)}
+                              >
+                                {contact.name}
+                              </button>
                               {contact.email && (
                                 <p className="text-xs text-muted-foreground">{contact.email}</p>
                               )}
@@ -624,19 +760,38 @@ export default function ContactsPage() {
                             {contact.stage}
                           </Badge>
                         </TableCell>
+                        <TableCell className="hidden lg:table-cell">
+                          <div className="flex items-center gap-1.5">
+                            <div className="w-12 h-1.5 rounded-full bg-muted overflow-hidden">
+                              <div
+                                className={`h-full rounded-full ${
+                                  contact.lead_score >= 70 ? 'bg-green-500' : contact.lead_score >= 40 ? 'bg-yellow-500' : 'bg-red-400'
+                                }`}
+                                style={{ width: `${contact.lead_score}%` }}
+                              />
+                            </div>
+                            <span className="text-xs font-medium">{contact.lead_score}</span>
+                          </div>
+                        </TableCell>
                         <TableCell className="hidden lg:table-cell text-xs text-muted-foreground">
                           {format(new Date(contact.created_at), 'dd MMM yyyy')}
                         </TableCell>
                         <TableCell>
                           <div className="flex items-center gap-1">
+                            <Button variant="ghost" size="icon" className="h-7 w-7" title="Catatan" onClick={() => { setNotesContactId(contact.id); setNotesContactName(contact.name || contact.phone_number); }}>
+                              <StickyNote className="h-3.5 w-3.5" />
+                            </Button>
                             <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEditContact(contact)}>
                               <Edit className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button variant="ghost" size="icon" className="h-7 w-7" title="Gabung kontak" onClick={() => { setMergeSourceId(contact.id); setMergeTargetId(''); setMergeSearch(''); }}>
+                              <GitMerge className="h-3.5 w-3.5" />
                             </Button>
                             <Button
                               variant="ghost"
                               size="icon"
                               className="h-7 w-7 text-destructive"
-                              onClick={() => { if (confirm('Hapus kontak ini?')) deleteContactMutation.mutate(contact.id); }}
+                              onClick={() => openConfirm({ title: 'Hapus kontak ini?', description: 'Kontak dan riwayat chatnya akan dihapus permanen.', onConfirm: () => deleteContactMutation.mutate(contact.id) })}
                             >
                               <Trash2 className="h-3.5 w-3.5" />
                             </Button>
@@ -702,7 +857,7 @@ export default function ContactsPage() {
                           variant="ghost"
                           size="icon"
                           className="h-7 w-7 text-destructive"
-                          onClick={() => { if (confirm(`Hapus label "${tag.name}"? Kontak tidak akan terhapus.`)) deleteLabelMutation.mutate(tag.id); }}
+                          onClick={() => openConfirm({ title: `Hapus label "${tag.name}"?`, description: 'Label akan dihapus, kontak tidak akan terpengaruh.', onConfirm: () => deleteLabelMutation.mutate(tag.id) })}
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </Button>
@@ -711,6 +866,84 @@ export default function ContactsPage() {
                     {tag.description && (
                       <p className="text-xs text-muted-foreground mt-2">{tag.description}</p>
                     )}
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+
+      {/* ============ DUPLICATES TAB ============ */}
+      {activeTab === 'duplicates' && (
+        <>
+          {dupLoading ? (
+            <div className="flex items-center justify-center py-16">
+              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+            </div>
+          ) : duplicates.length === 0 ? (
+            <Card>
+              <CardContent className="flex flex-col items-center justify-center py-16 text-center">
+                <CheckCircle className="h-12 w-12 text-green-500 mb-4" />
+                <h3 className="text-lg font-semibold mb-1">Tidak ada duplikat</h3>
+                <p className="text-sm text-muted-foreground">Semua kontak Anda sudah unik. Tidak ditemukan kontak duplikat berdasarkan nomor telepon atau nama.</p>
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="space-y-4">
+              <p className="text-sm text-muted-foreground">Ditemukan <span className="font-semibold text-foreground">{duplicates.length}</span> grup kontak duplikat. Pilih dua kontak untuk digabung.</p>
+              {duplicates.map((group, idx) => (
+                <Card key={idx}>
+                  <CardContent className="p-4">
+                    <div className="flex items-center gap-2 mb-3">
+                      <Badge variant="outline" className="text-xs">
+                        {group.match_type === 'phone' ? 'Telepon sama' : 'Nama sama'}
+                      </Badge>
+                      <span className="text-sm font-medium text-muted-foreground">{group.match_value}</span>
+                      <span className="text-xs text-muted-foreground">({group.contacts.length} kontak)</span>
+                    </div>
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Nama</TableHead>
+                          <TableHead>Telepon</TableHead>
+                          <TableHead>Email</TableHead>
+                          <TableHead className="text-center">Pesan</TableHead>
+                          <TableHead className="text-center">Percakapan</TableHead>
+                          <TableHead className="text-center">Deal</TableHead>
+                          <TableHead>Dibuat</TableHead>
+                          <TableHead className="text-right">Aksi</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {group.contacts.map((c) => (
+                          <TableRow key={c.id}>
+                            <TableCell className="font-medium">{c.name || '-'}</TableCell>
+                            <TableCell className="text-sm">{c.phone_number}</TableCell>
+                            <TableCell className="text-sm">{c.email || '-'}</TableCell>
+                            <TableCell className="text-center">{c.total_messages}</TableCell>
+                            <TableCell className="text-center">{c._count.conversations}</TableCell>
+                            <TableCell className="text-center">{c._count.deals}</TableCell>
+                            <TableCell className="text-sm">{format(new Date(c.created_at), 'dd/MM/yy')}</TableCell>
+                            <TableCell className="text-right">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-7 text-xs gap-1"
+                                onClick={() => {
+                                  const others = group.contacts.filter((o) => o.id !== c.id);
+                                  setMergeSourceId(others[0].id);
+                                  setMergeTargetId(c.id);
+                                  setMergeSearch(c.name || c.phone_number);
+                                }}
+                              >
+                                <GitMerge className="h-3 w-3" /> Gabung ke sini
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
                   </CardContent>
                 </Card>
               ))}
@@ -1047,6 +1280,142 @@ export default function ContactsPage() {
                 </Button>
               </>
             )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ============ NOTES DIALOG ============ */}
+      <Dialog open={!!notesContactId} onOpenChange={(open) => { if (!open) { setNotesContactId(null); setNewNote(''); } }}>
+        <DialogContent className="max-w-lg max-h-[80vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <StickyNote className="h-5 w-5" /> Catatan — {notesContactName}
+            </DialogTitle>
+          </DialogHeader>
+
+          {/* New note input */}
+          <div className="flex gap-2">
+            <Textarea
+              placeholder="Tulis catatan baru..."
+              value={newNote}
+              onChange={(e) => setNewNote(e.target.value)}
+              className="min-h-[60px] text-sm"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey && newNote.trim()) {
+                  e.preventDefault();
+                  createNoteMutation.mutate(newNote.trim());
+                }
+              }}
+            />
+            <Button
+              size="icon"
+              className="shrink-0 h-[60px] w-10"
+              disabled={!newNote.trim() || createNoteMutation.isPending}
+              onClick={() => { if (newNote.trim()) createNoteMutation.mutate(newNote.trim()); }}
+            >
+              {createNoteMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+            </Button>
+          </div>
+
+          {/* Notes list */}
+          <ScrollArea className="flex-1 max-h-[400px]">
+            {notesLoading ? (
+              <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+            ) : notesData.length === 0 ? (
+              <div className="text-center py-8 text-sm text-muted-foreground">
+                <StickyNote className="h-8 w-8 mx-auto mb-2 opacity-30" />
+                Belum ada catatan
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {notesData.map((note: any) => (
+                  <div key={note.id} className="group border rounded-lg p-3 hover:bg-muted/30 transition-colors">
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="text-sm whitespace-pre-wrap flex-1">{note.content}</p>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 shrink-0 opacity-0 group-hover:opacity-100 text-destructive"
+                        onClick={() => openConfirm({ title: 'Hapus catatan ini?', description: 'Catatan akan dihapus permanen.', onConfirm: () => deleteNoteMutation.mutate(note.id) })}
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
+                    </div>
+                    <div className="flex items-center gap-2 mt-2 text-[10px] text-muted-foreground">
+                      <span className="font-medium">{note.user?.name || 'Unknown'}</span>
+                      <span>·</span>
+                      <span>{format(new Date(note.created_at), 'dd MMM yyyy HH:mm')}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </ScrollArea>
+        </DialogContent>
+      </Dialog>
+
+      {/* Merge Contact Dialog */}
+      <Dialog open={!!mergeSourceId} onOpenChange={(open) => { if (!open) { setMergeSourceId(null); setMergeTargetId(''); setMergeSearch(''); } }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Gabung Kontak</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Data dari kontak sumber akan dipindahkan ke kontak tujuan (chat, deals, notes, tags).
+            Kontak sumber akan dihapus setelah merge.
+          </p>
+          <div className="space-y-3">
+            <div>
+              <Label className="text-xs text-muted-foreground">Kontak Sumber (akan dihapus)</Label>
+              <div className="mt-1 p-2 bg-muted rounded text-sm font-medium">
+                {contacts.find((c: any) => c.id === mergeSourceId)?.name || contacts.find((c: any) => c.id === mergeSourceId)?.phone_number || '-'}
+              </div>
+            </div>
+            <div>
+              <Label className="text-xs text-muted-foreground">Kontak Tujuan (utama)</Label>
+              <Input
+                placeholder="Cari kontak tujuan..."
+                className="mt-1"
+                value={mergeSearch}
+                onChange={(e) => setMergeSearch(e.target.value)}
+                autoFocus
+              />
+              {mergeSearch && (
+                <div className="mt-1 max-h-40 overflow-y-auto border rounded">
+                  {contacts
+                    .filter((c: any) => c.id !== mergeSourceId && (c.name?.toLowerCase().includes(mergeSearch.toLowerCase()) || c.phone_number.includes(mergeSearch)))
+                    .slice(0, 8)
+                    .map((c: any) => (
+                      <button
+                        key={c.id}
+                        type="button"
+                        className="w-full text-left px-3 py-2 text-sm hover:bg-muted transition-colors"
+                        onClick={() => { setMergeTargetId(c.id); setMergeSearch(c.name || c.phone_number); }}
+                      >
+                        <span className="font-medium">{c.name || c.phone_number}</span>
+                        <span className="text-muted-foreground ml-2 text-xs">{c.phone_number}</span>
+                      </button>
+                    ))}
+                </div>
+              )}
+            </div>
+          </div>
+          <div className="flex justify-end gap-2 mt-4">
+            <Button variant="outline" onClick={() => setMergeSourceId(null)}>Batal</Button>
+            <Button
+              disabled={!mergeTargetId || mergeMutation.isPending}
+              onClick={() =>
+                openConfirm({
+                  title: 'Yakin gabung kontak?',
+                  description: 'Semua data dari kontak sumber akan dipindahkan dan kontak sumber dihapus. Aksi ini tidak bisa dibatalkan.',
+                  onConfirm: () => mergeMutation.mutate({ target_id: mergeTargetId, source_id: mergeSourceId! }),
+                })
+              }
+            >
+              {mergeMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              <GitMerge className="mr-2 h-4 w-4" />
+              Gabung
+            </Button>
           </div>
         </DialogContent>
       </Dialog>

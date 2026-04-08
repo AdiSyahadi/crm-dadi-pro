@@ -14,12 +14,24 @@ import mediaRoutes from './media.routes';
 import scheduledMessageRoutes from './scheduled-message.routes';
 import webhookConfigRoutes from './webhook-config.routes';
 import autoResponseRoutes from './auto-response.routes';
+import notificationRoutes from './notification.routes';
+import quickReplyRoutes from './quick-reply.routes';
+import csatRoutes from './csat.routes';
+import slaRoutes from './sla.routes';
+import savedFilterRoutes from './saved-filter.routes';
+import holidayRoutes from './holiday.routes';
+import exportRoutes from './export.routes';
+import chatbotRoutes from './chatbot.routes';
+import internalChatRoutes from './internal-chat.routes';
 import adminPlanRoutes from './admin-plan.routes';
 import adminOrgRoutes from './admin-org.routes';
 import adminDashboardRoutes from './admin-dashboard.routes';
 import invoiceRoutes from './invoice.routes';
 import pricingRoutes from './pricing.routes';
 import paymentSettingsRoutes from './payment-settings.routes';
+import trackedLinkRoutes from './tracked-link.routes';
+import receiptRoutes from './receipt.routes';
+import taskRoutes from './task.routes';
 
 const router = Router();
 
@@ -52,6 +64,18 @@ router.use('/media', mediaRoutes);
 router.use('/scheduled-messages', scheduledMessageRoutes);
 router.use('/webhook-configs', webhookConfigRoutes);
 router.use('/auto-responses', autoResponseRoutes);
+router.use('/notifications', notificationRoutes);
+router.use('/quick-replies', quickReplyRoutes);
+router.use('/csat', csatRoutes);
+router.use('/sla', slaRoutes);
+router.use('/saved-filters', savedFilterRoutes);
+router.use('/holidays', holidayRoutes);
+router.use('/export', exportRoutes);
+router.use('/chatbot', chatbotRoutes);
+router.use('/internal-chat', internalChatRoutes);
+router.use('/tracked-links', trackedLinkRoutes);
+router.use('/receipts', receiptRoutes);
+router.use('/tasks', taskRoutes);
 
 // Admin routes (Super Admin only)
 router.use('/admin/plans', adminPlanRoutes);

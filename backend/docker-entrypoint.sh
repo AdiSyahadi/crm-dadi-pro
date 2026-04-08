@@ -1,12 +1,18 @@
 #!/bin/sh
-set -e
+
+MAX_RETRIES=3
+RETRY_COUNT=0
 
 echo "🔄 Running Prisma db push (sync schema to database)..."
-npx prisma db push --url "$DATABASE_URL" --accept-data-loss 2>&1 || {
-  echo "⚠️ Prisma db push failed, retrying in 5s..."
+until npx prisma db push --url "$DATABASE_URL" --accept-data-loss 2>&1; do
+  RETRY_COUNT=$((RETRY_COUNT + 1))
+  if [ "$RETRY_COUNT" -ge "$MAX_RETRIES" ]; then
+    echo "❌ Prisma db push failed after $MAX_RETRIES attempts. Exiting."
+    exit 1
+  fi
+  echo "⚠️ Prisma db push failed (attempt $RETRY_COUNT/$MAX_RETRIES), retrying in 5s..."
   sleep 5
-  npx prisma db push --url "$DATABASE_URL" --accept-data-loss
-}
+done
 echo "✅ Database schema synced"
 
 echo "🚀 Starting Power WA backend..."

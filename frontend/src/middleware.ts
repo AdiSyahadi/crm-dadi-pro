@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
-const publicPaths = ['/login', '/register'];
+const publicPaths = ['/login', '/register', '/accept-invite'];
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -16,8 +16,13 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // For dashboard routes, we rely on client-side auth check
-  // This middleware just ensures the basic redirect from / works
+  // SSR auth guard: check logged_in cookie to prevent unauthenticated dashboard access
+  const loggedIn = request.cookies.get('logged_in')?.value;
+  if (!loggedIn) {
+    const loginUrl = new URL('/login', request.url);
+    return NextResponse.redirect(loginUrl);
+  }
+
   return NextResponse.next();
 }
 

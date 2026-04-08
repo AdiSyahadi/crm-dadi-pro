@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { dealService } from '../services/deal.service';
+import { forecastingService } from '../services/forecasting.service';
 import {
   createDealSchema,
   updateDealSchema,
@@ -128,6 +129,15 @@ export class DealController {
       const input = dealReportSchema.parse(req.query);
       const report = await dealService.getClosingReport(req.user!.organizationId, input);
       sendSuccess(res, report);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async forecast(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const data = await forecastingService.getForecast(req.user!.organizationId);
+      sendSuccess(res, data);
     } catch (error) {
       next(error);
     }

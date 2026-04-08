@@ -4,6 +4,7 @@ import { env } from '../config/env';
 import { messageService } from '../services/message.service';
 import { prisma } from '../config/database';
 import { conversationService } from '../services/conversation.service';
+import { paymentCallbackService } from '../services/payment-callback.service';
 import crypto from 'crypto';
 
 export class WebhookController {
@@ -11,21 +12,25 @@ export class WebhookController {
     // Verify webhook signature if secret is configured
     if (env.WEBHOOK_SECRET) {
       const signature = req.headers['x-webhook-signature'] as string;
-      if (signature) {
-        const bodyStr = JSON.stringify(req.body);
-        const expectedHex = crypto
-          .createHmac('sha256', env.WEBHOOK_SECRET)
-          .update(bodyStr)
-          .digest('hex');
+      if (!signature) {
+        console.warn('Webhook signature header missing');
+        res.status(401).json({ error: 'Missing webhook signature' });
+        return;
+      }
 
-        // WA API sends "sha256=<hex>" format — strip prefix for comparison
-        const receivedHex = signature.startsWith('sha256=') ? signature.slice(7) : signature;
+      const bodyStr = JSON.stringify(req.body);
+      const expectedHex = crypto
+        .createHmac('sha256', env.WEBHOOK_SECRET)
+        .update(bodyStr)
+        .digest('hex');
 
-        if (receivedHex !== expectedHex) {
-          console.warn('Webhook signature mismatch');
-          res.status(401).json({ error: 'Invalid webhook signature' });
-          return;
-        }
+      // WA API sends "sha256=<hex>" format — strip prefix for comparison
+      const receivedHex = signature.startsWith('sha256=') ? signature.slice(7) : signature;
+
+      if (receivedHex !== expectedHex) {
+        console.warn('Webhook signature mismatch');
+        res.status(401).json({ error: 'Invalid webhook signature' });
+        return;
       }
     }
 
@@ -202,6 +207,45 @@ export class WebhookController {
     } catch (err: any) {
       console.error(`❌ n8n-reply failed: ${err.message}`);
       res.status(500).json({ error: err.message || 'Failed to send reply' });
+    }
+  }
+
+  async handlePaymentCallback(req: Request, res: Response, _next: NextFunction): Promise<void> {
+    try {
+      // Verify webhook secret (optional but recommended)
+      const secret = req.headers['x-webhook-secret'] as string;
+      if (env.WEBHOOK_SECRET && secret !== env.WEBHOOK_SECRET) {
+        res.status(401).json({ error: 'Invalid or missing webhook secret' });
+        return;
+      }
+
+      const { tracking_code, deal_id, phone_number, amount, payment_method, payment_ref, payer_name, metadata } = req.body;
+
+      if (!amount || typeof amount !== 'number') {
+        res.status(400).json({ error: 'amount (number) is required' });
+        return;
+      }
+
+      if (!tracking_code && !deal_id && !phone_number) {
+        res.status(400).json({ error: 'At least one identifier required: tracking_code, deal_id, or phone_number' });
+        return;
+      }
+
+      const result = await paymentCallbackService.processPayment({
+        tracking_code,
+        deal_id,
+        phone_number,
+        amount,
+        payment_method,
+        payment_ref,
+        payer_name,
+        metadata,
+      });
+
+      res.status(result.success ? 200 : 404).json(result);
+    } catch (err: any) {
+      console.error(`❌ payment-callback failed: ${err.message}`);
+      res.status(500).json({ error: err.message || 'Failed to process payment' });
     }
   }
 }

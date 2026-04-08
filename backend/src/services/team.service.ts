@@ -212,13 +212,14 @@ export class TeamService {
       select: { id: true, name: true, email: true, role: true, is_active: true },
     });
   }
-  async resetPassword(organizationId: string, userId: string, newPassword: string) {
+  async resetPassword(organizationId: string, userId: string, newPassword: string, callerRole: string) {
     const user = await prisma.user.findFirst({
       where: { id: userId, organization_id: organizationId },
     });
     if (!user) throw AppError.notFound('User not found');
 
     if (user.role === 'OWNER') throw AppError.badRequest('Tidak bisa reset password OWNER dari sini');
+    if (callerRole === 'ADMIN' && user.role !== 'AGENT') throw AppError.forbidden('Admin hanya bisa reset password Agent');
 
     if (newPassword.length < 8) throw AppError.badRequest('Password minimal 8 karakter');
 

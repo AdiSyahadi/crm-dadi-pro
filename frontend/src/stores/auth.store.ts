@@ -81,6 +81,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     const { accessToken, refreshToken, user, organization } = data.data;
     localStorage.setItem('accessToken', accessToken);
     localStorage.setItem('refreshToken', refreshToken);
+    document.cookie = 'logged_in=1; path=/; max-age=604800; SameSite=Lax';
     set({ user: { ...user, organization }, isAuthenticated: true });
     connectSocket();
   },
@@ -90,6 +91,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     const { accessToken, refreshToken, user, organization } = data.data;
     localStorage.setItem('accessToken', accessToken);
     localStorage.setItem('refreshToken', refreshToken);
+    document.cookie = 'logged_in=1; path=/; max-age=604800; SameSite=Lax';
     set({ user: { ...user, organization }, isAuthenticated: true });
     connectSocket();
   },
@@ -103,6 +105,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     }
     localStorage.removeItem('accessToken');
     localStorage.removeItem('refreshToken');
+    document.cookie = 'logged_in=; path=/; max-age=0';
     disconnectSocket();
     set({ user: null, isAuthenticated: false });
   },
@@ -129,6 +132,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     } catch {
       localStorage.removeItem('accessToken');
       localStorage.removeItem('refreshToken');
+      document.cookie = 'logged_in=; path=/; max-age=0';
       set({ user: null, isAuthenticated: false, isLoading: false });
     }
   },

@@ -50,6 +50,15 @@ model Organization {
   scheduled_messages ScheduledMessage[]
   auto_responses     AutoResponse[]
   invoices           Invoice[]
+  quick_replies      QuickReply[]
+  csat_settings      CSATSetting?
+  sla_settings       SlaSetting?
+  holidays           Holiday[]
+  internal_chats     InternalChat[]
+  tracked_links      TrackedLink[]
+  receipts           Receipt[]
+  receipt_config     Json?
+  tasks              Task[]
 
   @@map("organizations")
 }
@@ -227,6 +236,9 @@ model User {
   created_broadcasts   Broadcast[]     @relation("BroadcastCreatedBy")
   created_templates    MessageTemplate[] @relation("TemplateCreatedBy")
   created_scheduled_messages ScheduledMessage[] @relation("ScheduledMessageCreatedBy")
+  contact_notes              ContactNote[]
+  created_tasks              Task[] @relation("TaskCreatedBy")
+  assigned_tasks             Task[] @relation("TaskAssignedTo")
 
   @@unique([organization_id, email])
   @@map("users")
@@ -381,6 +393,7 @@ model Contact {
   last_message_at  DateTime?
   first_message_at DateTime?
   total_messages   Int       @default(0)
+  lead_score       Int       @default(0)
 
   is_blocked     Boolean @default(false)
   blocked_reason String?
@@ -393,10 +406,13 @@ model Contact {
   broadcast_recipients BroadcastRecipient[]
   scheduled_message_recipients ScheduledMessageRecipient[]
   deals         Deal[]
+  contact_notes ContactNote[]
+  tasks         Task[]
 
   @@unique([organization_id, phone_number])
   @@index([organization_id, stage])
   @@index([organization_id, last_message_at])
+  @@index([organization_id, lead_score])
   @@index([phone_number])
   @@map("contacts")
 }
@@ -451,6 +467,21 @@ model ContactTag {
   @@map("contact_tags")
 }
 
+model ContactNote {
+  id         String  @id @default(uuid())
+  contact_id String
+  contact    Contact @relation(fields: [contact_id], references: [id], onDelete: Cascade)
+  user_id    String
+  user       User    @relation(fields: [user_id], references: [id])
+  content    String  @db.Text
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@index([contact_id, created_at])
+  @@map("contact_notes")
+}
+
 // ============================================
 // CONVERSATION
 // ============================================
@@ -473,7 +504,7 @@ model Conversation {
   total_messages Int @default(0)
 
   last_message_at        DateTime?
-  last_message_preview   String?
+  last_message_preview   String?  @db.VarChar(500)
   last_message_direction MessageDirection?
 
   assigned_to_user_id String?
@@ -487,6 +518,8 @@ model Conversation {
 
   first_response_at DateTime?
   sla_deadline_at   DateTime?
+  sla_breached_at   DateTime?
+  sla_warning_sent  Boolean   @default(false)
 
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
@@ -495,6 +528,7 @@ model Conversation {
   assignments ConversationAssignment[]
   labels      ConversationLabel[]
   deals       Deal[]
+  tasks       Task[]
 
   @@unique([organization_id, chat_jid, instance_id])
   @@index([organization_id, status, last_message_at])
@@ -784,10 +818,15 @@ model Deal {
   custom_fields Json?
   is_archived   Boolean @default(false)
 
+  rotten_notified_at DateTime?
+
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
 
-  activities DealActivity[]
+  activities    DealActivity[]
+  tracked_links TrackedLink[]
+  receipts      Receipt[]
+  tasks         Task[]
 
   @@index([organization_id, stage])
   @@index([organization_id, assigned_to_id])
@@ -837,6 +876,161 @@ enum DealActivityType {
   LOST
   REOPENED
   CREATED
+  LINK_CREATED
+  LINK_CLICKED
+  PAYMENT_RECEIVED
+  RECEIPT_SENT
+}
+
+// ============================================
+// TRACKED LINK
+// ============================================
+
+model TrackedLink {
+  id              String @id @default(uuid())
+  organization_id String
+  organization    Organization @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  deal_id         String
+  deal            Deal @relation(fields: [deal_id], references: [id], onDelete: Cascade)
+  created_by_id   String
+
+  original_url    String  @db.Text
+  tracking_code   String  @unique
+  label           String?
+
+  click_count     Int     @default(0)
+  is_converted    Boolean @default(false)
+  converted_at    DateTime?
+  conversion_value Decimal? @db.Decimal(15, 2)
+  payment_ref     String?
+  metadata        Json?
+  expires_at      DateTime?
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  receipts Receipt[]
+
+  @@index([organization_id, deal_id])
+  @@index([tracking_code])
+  @@map("tracked_links")
+}
+
+// ============================================
+// RECEIPT / KWITANSI
+// ============================================
+
+model Receipt {
+  id              String @id @default(uuid())
+  organization_id String
+  organization    Organization @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  deal_id         String?
+  deal            Deal? @relation(fields: [deal_id], references: [id], onDelete: SetNull)
+  tracked_link_id String?
+  tracked_link    TrackedLink? @relation(fields: [tracked_link_id], references: [id], onDelete: SetNull)
+
+  receipt_number  String
+  type            String   @default("invoice")
+  status          ReceiptStatus @default(DRAFT)
+
+  recipient_name  String
+  recipient_phone String?
+  recipient_email String?
+
+  items           Json
+  subtotal        Decimal  @db.Decimal(15, 2)
+  tax_amount      Decimal  @default(0) @db.Decimal(15, 2)
+  total_amount    Decimal  @db.Decimal(15, 2)
+  currency        String   @default("IDR")
+
+  payment_method  String?
+  payment_ref     String?
+  notes           String?  @db.Text
+  footer_text     String?  @db.Text
+
+  pdf_url         String?
+  sent_via_wa     Boolean  @default(false)
+  sent_at         DateTime?
+
+  revision_of     String?
+  voided_at       DateTime?
+  voided_reason   String?
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@unique([organization_id, receipt_number])
+  @@index([organization_id, status])
+  @@index([organization_id, deal_id])
+  @@map("receipts")
+}
+
+enum ReceiptStatus {
+  DRAFT
+  SENT
+  FAILED
+  VOIDED
+}
+
+// ============================================
+// TASK & REMINDER
+// ============================================
+
+model Task {
+  id              String @id @default(uuid())
+  organization_id String
+  organization    Organization @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+
+  title       String
+  description String? @db.Text
+  type        TaskType @default(OTHER)
+  status      TaskStatus @default(TODO)
+  priority    Priority @default(MEDIUM)
+
+  due_date    DateTime?
+  reminder_at DateTime?
+  reminder_sent Boolean @default(false)
+
+  created_by_id String
+  created_by    User @relation("TaskCreatedBy", fields: [created_by_id], references: [id])
+
+  assigned_to_id String?
+  assigned_to    User? @relation("TaskAssignedTo", fields: [assigned_to_id], references: [id])
+
+  contact_id String?
+  contact    Contact? @relation(fields: [contact_id], references: [id], onDelete: SetNull)
+
+  deal_id String?
+  deal    Deal? @relation(fields: [deal_id], references: [id], onDelete: SetNull)
+
+  conversation_id String?
+  conversation    Conversation? @relation(fields: [conversation_id], references: [id], onDelete: SetNull)
+
+  completed_at DateTime?
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@index([organization_id, status])
+  @@index([organization_id, assigned_to_id])
+  @@index([organization_id, due_date])
+  @@index([reminder_at, reminder_sent])
+  @@map("tasks")
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  DONE
+  CANCELLED
+}
+
+enum TaskType {
+  FOLLOW_UP
+  CALL
+  MEETING
+  EMAIL
+  OTHER
 }
 
 // ============================================
@@ -915,6 +1109,11 @@ enum NotificationType {
   MENTION
   BROADCAST_COMPLETED
   INSTANCE_DISCONNECTED
+  SLA_WARNING
+  SLA_BREACHED
+  TASK_DUE
+  TASK_ASSIGNED
+  DEAL_ROTTEN
   SYSTEM
 }
 
@@ -1092,4 +1291,181 @@ model AutoResponse {
 
   @@unique([organization_id, trigger])
   @@map("auto_responses")
+}
+
+// ============================================
+// QUICK REPLY (Canned Responses)
+// ============================================
+
+model QuickReply {
+  id              String @id @default(uuid())
+  organization_id String
+  organization    Organization @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+
+  shortcut    String        // e.g. "salam", "harga", "alamat"
+  title       String
+  content     String @db.Text
+  category    String?
+  media_url   String?
+  media_type  MessageType?
+
+  usage_count Int     @default(0)
+  is_active   Boolean @default(true)
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@unique([organization_id, shortcut])
+  @@index([organization_id, is_active])
+  @@map("quick_replies")
+}
+
+// ============================================
+// CSAT (Customer Satisfaction)
+// ============================================
+
+model CSATResponse {
+  id              String @id @default(uuid())
+  organization_id String
+  conversation_id String
+  contact_id      String
+
+  rating       Int        // 1-5
+  feedback     String?    @db.Text
+  resolved_by_id String?
+  responded_at DateTime   @default(now())
+
+  created_at DateTime @default(now())
+
+  @@index([organization_id, created_at])
+  @@index([conversation_id])
+  @@map("csat_responses")
+}
+
+model CSATSetting {
+  id              String @id @default(uuid())
+  organization_id String @unique
+  organization    Organization @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+
+  is_enabled       Boolean @default(false)
+  message_template String  @db.Text
+  delay_minutes    Int     @default(5)  // delay after resolve before sending
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@map("csat_settings")
+}
+
+// ============================================
+// SLA SETTING (Per Organization)
+// ============================================
+
+model SlaSetting {
+  id              String @id @default(uuid())
+  organization_id String @unique
+  organization    Organization @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+
+  is_enabled              Boolean @default(false)
+  first_response_minutes  Int     @default(30)   // SLA for first reply
+  resolution_minutes      Int     @default(1440) // SLA for full resolution (24h)
+  escalation_enabled      Boolean @default(true)
+  warning_threshold_pct   Int     @default(80)   // warn at 80% of SLA time
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@map("sla_settings")
+}
+
+// ============================================
+// SAVED FILTER (Custom Views)
+// ============================================
+
+model SavedFilter {
+  id              String @id @default(uuid())
+  organization_id String
+  user_id         String
+
+  name       String
+  entity     String         // "conversation" | "contact" | "deal"
+  filters    Json           // the filter criteria
+  is_default Boolean @default(false)
+  sort_order Int     @default(0)
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@index([user_id, entity])
+  @@map("saved_filters")
+}
+
+// ============================================
+// HOLIDAY CALENDAR
+// ============================================
+
+model Holiday {
+  id              String @id @default(uuid())
+  organization_id String
+  organization    Organization @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+
+  name       String
+  date       DateTime @db.Date
+  is_recurring Boolean @default(false) // recur every year
+
+  created_at DateTime @default(now())
+
+  @@unique([organization_id, date])
+  @@map("holidays")
+}
+
+// ============================================
+// INTERNAL CHAT (Agent-to-Agent)
+// ============================================
+
+model InternalChat {
+  id String @id @default(uuid())
+  organization_id String
+  organization    Organization @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+
+  // null = group chat, otherwise DM between two users
+  name        String?
+  is_group    Boolean @default(false)
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  participants InternalChatParticipant[]
+  messages     InternalMessage[]
+
+  @@map("internal_chats")
+}
+
+model InternalChatParticipant {
+  id      String @id @default(uuid())
+  chat_id String
+  chat    InternalChat @relation(fields: [chat_id], references: [id], onDelete: Cascade)
+  user_id String
+
+  joined_at DateTime @default(now())
+  last_read_at DateTime?
+
+  @@unique([chat_id, user_id])
+  @@map("internal_chat_participants")
+}
+
+model InternalMessage {
+  id      String @id @default(uuid())
+  chat_id String
+  chat    InternalChat @relation(fields: [chat_id], references: [id], onDelete: Cascade)
+  sender_id String
+
+  content    String @db.Text
+  media_url  String?
+  media_type MessageType?
+
+  created_at DateTime @default(now())
+
+  @@index([chat_id, created_at])
+  @@map("internal_messages")
 }
