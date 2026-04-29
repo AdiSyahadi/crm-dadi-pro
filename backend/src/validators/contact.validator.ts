@@ -24,7 +24,7 @@ export const listContactsSchema = z.object({
   stage: z.enum(['NEW', 'LEAD', 'QUALIFIED', 'CUSTOMER', 'VIP', 'CHURNED']).optional(),
   source: z.enum(['WHATSAPP', 'MANUAL', 'IMPORT', 'API', 'WEBSITE']).optional(),
   tag: z.string().optional(),
-  sort_by: z.enum(['name', 'phone_number', 'created_at', 'last_message_at', 'total_messages']).default('created_at'),
+  sort_by: z.enum(['name', 'phone_number', 'created_at', 'last_message_at', 'total_messages', 'lead_score']).default('created_at'),
   sort_order: z.enum(['asc', 'desc']).default('desc'),
 });
 

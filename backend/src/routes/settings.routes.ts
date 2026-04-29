@@ -16,4 +16,8 @@ router.put('/notification-preferences', settingsController.updateNotificationPre
 router.get('/rotten-deals', settingsController.getRottenDealSettings.bind(settingsController));
 router.put('/rotten-deals', settingsController.updateRottenDealSettings.bind(settingsController));
 
+router.get('/midtrans', settingsController.getMidtransConfig.bind(settingsController));
+router.put('/midtrans', settingsController.saveMidtransConfig.bind(settingsController));
+router.post('/midtrans/test', settingsController.testMidtransConnection.bind(settingsController));
+
 export default router;

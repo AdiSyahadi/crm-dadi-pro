@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Star, Loader2, Settings, BarChart3 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
@@ -32,6 +33,14 @@ const STAR_COLORS: Record<number, string> = {
 export default function CSATPage() {
   const queryClient = useQueryClient();
   const [tab, setTab] = useState('analytics');
+  const [timeRange, setTimeRange] = useState('30');
+
+  const getDateRange = () => {
+    if (timeRange === 'all') return {};
+    const days = parseInt(timeRange, 10);
+    const start = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+    return { start_date: start };
+  };
 
   // ─── Settings ───────────────────────────────────
   const { data: settings, isLoading: settingsLoading } = useQuery({
@@ -68,9 +77,12 @@ export default function CSATPage() {
 
   // ─── Analytics ──────────────────────────────────
   const { data: analytics, isLoading: analyticsLoading } = useQuery({
-    queryKey: ['csat-analytics'],
+    queryKey: ['csat-analytics', timeRange],
     queryFn: async () => {
-      const { data } = await api.get('/csat/analytics');
+      const range = getDateRange();
+      const params = new URLSearchParams();
+      if (range.start_date) params.set('start_date', range.start_date);
+      const { data } = await api.get(`/csat/analytics?${params.toString()}`);
       return data.data as {
         total: number;
         average: number;
@@ -94,6 +106,20 @@ export default function CSATPage() {
         </TabsList>
 
         <TabsContent value="analytics" className="space-y-6 mt-6">
+          <div className="flex justify-end">
+            <Select value={timeRange} onValueChange={setTimeRange}>
+              <SelectTrigger className="w-[180px]">
+                <SelectValue placeholder="Periode" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="7">7 Hari Terakhir</SelectItem>
+                <SelectItem value="30">30 Hari Terakhir</SelectItem>
+                <SelectItem value="90">90 Hari Terakhir</SelectItem>
+                <SelectItem value="365">1 Tahun Terakhir</SelectItem>
+                <SelectItem value="all">Semua Waktu</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
           {analyticsLoading ? (
             <div className="flex items-center justify-center py-12"><Loader2 className="h-6 w-6 animate-spin" /></div>
           ) : !analytics || analytics.total === 0 ? (

@@ -42,6 +42,8 @@ import {
   UserPlus,
   Trash2,
   Receipt,
+  CreditCard,
+  Save,
 } from 'lucide-react';
 import { WebhookSettings } from '@/components/settings/webhook-settings';
 import { toast } from 'sonner';
@@ -308,6 +310,10 @@ export default function SettingsPage() {
           <TabsTrigger value="receipt">
             <Receipt className="h-4 w-4 mr-1.5" />
             Kwitansi
+          </TabsTrigger>
+          <TabsTrigger value="midtrans">
+            <CreditCard className="h-4 w-4 mr-1.5" />
+            Midtrans
           </TabsTrigger>
         </TabsList>
 
@@ -833,6 +839,11 @@ export default function SettingsPage() {
         <TabsContent value="receipt" className="space-y-4">
           <ReceiptConfigTab />
         </TabsContent>
+
+        {/* Midtrans Tab */}
+        <TabsContent value="midtrans" className="space-y-4">
+          <MidtransConfigTab />
+        </TabsContent>
       </Tabs>
     </div>
   );
@@ -1081,6 +1092,261 @@ function ReceiptConfigTab() {
           <Button onClick={() => saveMutation.mutate(form)} disabled={saveMutation.isPending}>
             {saveMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
             Simpan Konfigurasi
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+/* ─── Midtrans Config Tab ─── */
+interface MidtransConfigData {
+  merchant_id: string;
+  server_key: string;
+  server_key_set: boolean;
+  client_key: string;
+  environment: string;
+  is_enabled: boolean;
+}
+
+function MidtransConfigTab() {
+  const queryClient = useQueryClient();
+  const [form, setForm] = useState({
+    merchant_id: '',
+    server_key: '',
+    client_key: '',
+    environment: 'sandbox',
+    is_enabled: false,
+  });
+  const [showServerKey, setShowServerKey] = useState(false);
+
+  const { data: config, isLoading } = useQuery<MidtransConfigData>({
+    queryKey: ['midtrans-config'],
+    queryFn: async () => {
+      const { data } = await api.get('/settings/midtrans');
+      return data.data;
+    },
+  });
+
+  useEffect(() => {
+    if (config) {
+      setForm({
+        merchant_id: config.merchant_id || '',
+        server_key: '',
+        client_key: config.client_key || '',
+        environment: config.environment || 'sandbox',
+        is_enabled: config.is_enabled || false,
+      });
+    }
+  }, [config]);
+
+  const saveMutation = useMutation({
+    mutationFn: async (input: typeof form) => {
+      const payload: Record<string, string | boolean> = {
+        merchant_id: input.merchant_id,
+        client_key: input.client_key,
+        environment: input.environment,
+        is_enabled: input.is_enabled ? 'true' : 'false',
+      };
+      if (input.server_key.trim()) {
+        payload.server_key = input.server_key;
+      }
+      await api.put('/settings/midtrans', payload);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['midtrans-config'] });
+      toast.success('Konfigurasi Midtrans berhasil disimpan');
+    },
+    onError: (err: any) => {
+      toast.error(err.response?.data?.error?.message || 'Gagal menyimpan konfigurasi Midtrans');
+    },
+  });
+
+  const testMutation = useMutation({
+    mutationFn: async () => {
+      const { data } = await api.post('/settings/midtrans/test');
+      return data.data;
+    },
+    onSuccess: (data) => {
+      if (data.connected) {
+        toast.success(`${data.message} (${data.environment})`);
+      } else {
+        toast.error(data.message);
+      }
+    },
+    onError: (err: any) => {
+      toast.error(err.response?.data?.error?.message || 'Gagal menguji koneksi');
+    },
+  });
+
+  if (isLoading) {
+    return (
+      <div className="flex justify-center py-8">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base flex items-center gap-2">
+          <CreditCard className="h-5 w-5 text-primary" />
+          Integrasi Midtrans
+        </CardTitle>
+        <CardDescription>
+          Konfigurasi payment gateway Midtrans untuk pembayaran otomatis pada deal.
+          Dapatkan kredensial dari{' '}
+          <a href="https://dashboard.midtrans.com" target="_blank" rel="noopener noreferrer" className="text-primary underline">
+            dashboard.midtrans.com
+          </a>
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-5">
+        {/* Status indicator */}
+        <div className="rounded-lg border p-4 bg-muted/30">
+          <div className="flex items-center gap-3">
+            {config?.is_enabled && config?.server_key_set ? (
+              <>
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-500/10">
+                  <CheckCircle2 className="h-5 w-5 text-emerald-500" />
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-emerald-700">Midtrans Aktif</p>
+                  <p className="text-xs text-muted-foreground">
+                    Environment: <span className="font-medium">{config.environment}</span>
+                    {config.merchant_id && <> • Merchant ID: <span className="font-mono">{config.merchant_id}</span></>}
+                  </p>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-amber-500/10">
+                  <XCircle className="h-5 w-5 text-amber-500" />
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-amber-700">Midtrans Belum Aktif</p>
+                  <p className="text-xs text-muted-foreground">
+                    {!config?.server_key_set ? 'Server Key belum diisi.' : 'Midtrans dinonaktifkan.'} Isi form di bawah untuk mengaktifkan.
+                  </p>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Enable toggle */}
+        <div className="flex items-center justify-between rounded-lg border p-3">
+          <div>
+            <Label className="text-sm font-medium">Aktifkan Midtrans</Label>
+            <p className="text-xs text-muted-foreground">Aktifkan pembayaran otomatis via Midtrans</p>
+          </div>
+          <Switch
+            checked={form.is_enabled}
+            onCheckedChange={(checked) => setForm({ ...form, is_enabled: checked })}
+          />
+        </div>
+
+        {/* Merchant ID */}
+        <div className="space-y-2">
+          <Label className="flex items-center gap-1.5">
+            <Building2 className="h-3.5 w-3.5 text-muted-foreground" />
+            Merchant ID
+          </Label>
+          <Input
+            value={form.merchant_id}
+            onChange={(e) => setForm({ ...form, merchant_id: e.target.value })}
+            placeholder="G573194614"
+          />
+          <p className="text-xs text-muted-foreground">
+            Merchant ID dari dashboard Midtrans Anda.
+          </p>
+        </div>
+
+        {/* Server Key */}
+        <div className="space-y-2">
+          <Label className="flex items-center gap-1.5">
+            <Key className="h-3.5 w-3.5 text-muted-foreground" />
+            Server Key
+          </Label>
+          <div className="relative">
+            <Input
+              type={showServerKey ? 'text' : 'password'}
+              value={form.server_key}
+              onChange={(e) => setForm({ ...form, server_key: e.target.value })}
+              placeholder={config?.server_key_set ? 'Biarkan kosong jika tidak ingin mengubah' : 'SB-Mid-server-xxxx'}
+              className="pr-10"
+            />
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7"
+              onClick={() => setShowServerKey(!showServerKey)}
+            >
+              {showServerKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            </Button>
+          </div>
+          {config?.server_key_set && (
+            <p className="text-xs text-muted-foreground">Server Key sudah diset: {config.server_key}</p>
+          )}
+        </div>
+
+        {/* Client Key */}
+        <div className="space-y-2">
+          <Label className="flex items-center gap-1.5">
+            <Key className="h-3.5 w-3.5 text-muted-foreground" />
+            Client Key
+          </Label>
+          <Input
+            value={form.client_key}
+            onChange={(e) => setForm({ ...form, client_key: e.target.value })}
+            placeholder="SB-Mid-client-xxxx"
+          />
+        </div>
+
+        {/* Environment */}
+        <div className="space-y-2">
+          <Label>Environment</Label>
+          <div className="flex gap-3">
+            {(['sandbox', 'production'] as const).map((env) => (
+              <Button
+                key={env}
+                variant={form.environment === env ? 'default' : 'outline'}
+                size="sm"
+                type="button"
+                onClick={() => setForm({ ...form, environment: env })}
+              >
+                {env === 'sandbox' ? 'Sandbox (Testing)' : 'Production'}
+              </Button>
+            ))}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Gunakan <span className="font-medium">Sandbox</span> untuk testing, <span className="font-medium">Production</span> untuk transaksi nyata.
+          </p>
+        </div>
+
+        {/* Actions */}
+        <div className="flex items-center gap-3 pt-2">
+          <Button
+            onClick={() => saveMutation.mutate(form)}
+            disabled={saveMutation.isPending}
+          >
+            {saveMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
+            Simpan Konfigurasi
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={testMutation.isPending || !config?.server_key_set}
+            onClick={() => testMutation.mutate()}
+          >
+            {testMutation.isPending ? (
+              <Loader2 className="h-4 w-4 animate-spin mr-2" />
+            ) : (
+              <Wifi className="h-4 w-4 mr-2" />
+            )}
+            Test Koneksi
           </Button>
         </div>
       </CardContent>

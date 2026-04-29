@@ -169,6 +169,43 @@ export class ConversationController {
     }
   }
 
+  async addLabel(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const { label, color } = req.body;
+      if (!label || typeof label !== 'string') {
+        res.status(400).json({ success: false, error: { code: 'INVALID_INPUT', message: 'label is required' } });
+        return;
+      }
+      const result = await conversationService.addLabel(req.user!.organizationId, req.params.id as string, label, color);
+      sendSuccess(res, result, 'Label ditambahkan');
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async removeLabel(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const { label } = req.body;
+      if (!label || typeof label !== 'string') {
+        res.status(400).json({ success: false, error: { code: 'INVALID_INPUT', message: 'label is required' } });
+        return;
+      }
+      await conversationService.removeLabel(req.user!.organizationId, req.params.id as string, label);
+      sendSuccess(res, null, 'Label dihapus');
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async getConversationLabels(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const labels = await conversationService.getConversationLabels(req.params.id as string);
+      sendSuccess(res, labels);
+    } catch (error) {
+      next(error);
+    }
+  }
+
   async markAsRead(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       // Verify AGENT access before marking read

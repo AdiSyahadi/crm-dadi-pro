@@ -33,10 +33,10 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Send, Plus, Play, Pause, XCircle, Trash2, Loader2, Radio, Search, Paperclip, X, FileText, Film, Music, Tag } from 'lucide-react';
+import { Send, Plus, Play, Pause, XCircle, Trash2, Loader2, Radio, Search, Paperclip, X, FileText, Film, Music, Tag, Download } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
-import { cn } from '@/lib/utils';
+import { cn, downloadCsv } from '@/lib/utils';
 
 const statusConfig: Record<string, { label: string; color: string }> = {
   DRAFT: { label: 'Draft', color: 'bg-gray-100 text-gray-700' },
@@ -311,10 +311,15 @@ export default function BroadcastsPage() {
           <h1 className="text-2xl font-bold">Broadcast</h1>
           <p className="text-sm text-muted-foreground">Kirim pesan massal ke kontak WhatsApp</p>
         </div>
-        <Button onClick={() => setDialogOpen(true)}>
-          <Plus className="h-4 w-4 mr-2" />
-          Buat Broadcast
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={() => { downloadCsv('/export/broadcasts', 'broadcast.csv').then(() => toast.success('Export berhasil')).catch(() => toast.error('Gagal export')); }}>
+            <Download className="h-4 w-4 mr-2" /> Export CSV
+          </Button>
+          <Button onClick={() => setDialogOpen(true)}>
+            <Plus className="h-4 w-4 mr-2" />
+            Buat Broadcast
+          </Button>
+        </div>
       </div>
 
       {/* Create Broadcast Dialog */}
@@ -392,7 +397,7 @@ export default function BroadcastsPage() {
               {formMediaFile ? (
                 <div className="flex items-center gap-3 p-3 bg-muted/50 rounded-lg">
                   {formMediaPreview ? (
-                    <img src={formMediaPreview} alt="" className="h-14 w-14 rounded object-cover" />
+                    <img src={formMediaPreview} alt="Preview media broadcast" className="h-14 w-14 rounded object-cover" />
                   ) : formMediaFile.type.startsWith('video/') ? (
                     <div className="h-14 w-14 rounded bg-muted flex items-center justify-center"><Film className="h-6 w-6 text-muted-foreground" /></div>
                   ) : formMediaFile.type.startsWith('audio/') ? (

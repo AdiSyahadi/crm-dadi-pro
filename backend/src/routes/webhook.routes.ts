@@ -12,4 +12,7 @@ router.post('/n8n-reply', webhookController.handleN8nReply);
 // Payment callback from external ecommerce/donation - auth via X-Webhook-Secret header
 router.post('/payment-callback', webhookController.handlePaymentCallback);
 
+// Midtrans payment notification - no auth header, verified by SHA-512 signature in body
+router.post('/midtrans', webhookController.handleMidtransNotification);
+
 export default router;

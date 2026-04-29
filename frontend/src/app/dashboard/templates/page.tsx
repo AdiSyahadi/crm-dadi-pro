@@ -17,9 +17,16 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
-import { Plus, FileText, Loader2, Trash2, ToggleLeft, ToggleRight, Edit } from 'lucide-react';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Plus, FileText, Loader2, Trash2, ToggleLeft, ToggleRight, Edit, Search, Download } from 'lucide-react';
 import { toast } from 'sonner';
-import { cn } from '@/lib/utils';
+import { cn, downloadCsv } from '@/lib/utils';
 
 export default function TemplatesPage() {
   const queryClient = useQueryClient();
@@ -27,6 +34,9 @@ export default function TemplatesPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState({ name: '', category: '', content: '' });
+  const [searchTerm, setSearchTerm] = useState('');
+  const [catFilter, setCatFilter] = useState('all');
+  const [sortField, setSortField] = useState('created_at:desc');
 
   const { data, isLoading } = useQuery({
     queryKey: ['templates'],
@@ -37,6 +47,18 @@ export default function TemplatesPage() {
   });
 
   const templates = data?.data || [];
+  const categories = Array.from(new Set(templates.map((t: any) => t.category).filter(Boolean))) as string[];
+  const filteredTemplates = templates.filter((t: any) => {
+    if (searchTerm && !t.name.toLowerCase().includes(searchTerm.toLowerCase()) && !t.content.toLowerCase().includes(searchTerm.toLowerCase())) return false;
+    if (catFilter !== 'all' && t.category !== catFilter) return false;
+    return true;
+  }).sort((a: any, b: any) => {
+    const [field, order] = sortField.split(':');
+    const dir = order === 'asc' ? 1 : -1;
+    if (field === 'name') return dir * a.name.localeCompare(b.name);
+    if (field === 'created_at') return dir * (new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+    return 0;
+  });
 
   const createMutation = useMutation({
     mutationFn: async (input: typeof form) => {
@@ -115,13 +137,17 @@ export default function TemplatesPage() {
           <h1 className="text-2xl font-bold">Template Pesan</h1>
           <p className="text-sm text-muted-foreground">Kelola template pesan untuk broadcast dan quick reply</p>
         </div>
-        <Dialog open={dialogOpen} onOpenChange={(open) => { setDialogOpen(open); if (!open) { setEditingId(null); setForm({ name: '', category: '', content: '' }); } }}>
-          <DialogTrigger asChild>
-            <Button onClick={openCreateDialog}>
-              <Plus className="h-4 w-4 mr-2" />
-              Buat Template
-            </Button>
-          </DialogTrigger>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={() => { downloadCsv('/export/templates', 'template.csv').then(() => toast.success('Export berhasil')).catch(() => toast.error('Gagal export')); }}>
+            <Download className="h-4 w-4 mr-2" /> Export CSV
+          </Button>
+          <Dialog open={dialogOpen} onOpenChange={(open) => { setDialogOpen(open); if (!open) { setEditingId(null); setForm({ name: '', category: '', content: '' }); } }}>
+            <DialogTrigger asChild>
+              <Button onClick={openCreateDialog}>
+                <Plus className="h-4 w-4 mr-2" />
+                Buat Template
+              </Button>
+            </DialogTrigger>
           <DialogContent>
             <DialogHeader>
               <DialogTitle>{editingId ? 'Edit Template' : 'Buat Template Baru'}</DialogTitle>
@@ -165,6 +191,7 @@ export default function TemplatesPage() {
             </form>
           </DialogContent>
         </Dialog>
+        </div>
       </div>
 
       {isLoading ? (
@@ -179,8 +206,39 @@ export default function TemplatesPage() {
           </CardContent>
         </Card>
       ) : (
+        <>
+        <div className="flex flex-col sm:flex-row gap-3">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input placeholder="Cari template..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="pl-9" />
+          </div>
+          {categories.length > 0 && (
+            <Select value={catFilter} onValueChange={setCatFilter}>
+              <SelectTrigger className="w-[180px]">
+                <SelectValue placeholder="Kategori" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Semua Kategori</SelectItem>
+                {categories.map((c) => (
+                  <SelectItem key={c} value={c}>{c}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+          <Select value={sortField} onValueChange={setSortField}>
+            <SelectTrigger className="w-[160px]">
+              <SelectValue placeholder="Urutkan" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="created_at:desc">Terbaru</SelectItem>
+              <SelectItem value="created_at:asc">Terlama</SelectItem>
+              <SelectItem value="name:asc">Nama A-Z</SelectItem>
+              <SelectItem value="name:desc">Nama Z-A</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {templates.map((tpl: any) => (
+          {filteredTemplates.map((tpl: any) => (
             <Card key={tpl.id} className="hover:shadow-md transition-shadow">
               <CardContent className="p-4">
                 <div className="flex items-start justify-between mb-2">
@@ -242,6 +300,7 @@ export default function TemplatesPage() {
             </Card>
           ))}
         </div>
+        </>
       )}
     </div>
   );

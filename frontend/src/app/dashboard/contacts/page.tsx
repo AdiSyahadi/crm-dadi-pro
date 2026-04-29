@@ -33,7 +33,7 @@ import {
 } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { Card, CardContent } from '@/components/ui/card';
-import { Search, Plus, Users, Phone, Building2, Loader2, Trash2, Edit, Tag, X, Tags, Upload, Download, FileSpreadsheet, AlertCircle, CheckCircle, StickyNote, Send, GitMerge, Zap } from 'lucide-react';
+import { Search, Plus, Users, Phone, Building2, Loader2, Trash2, Edit, Tag, X, Tags, Upload, Download, FileSpreadsheet, AlertCircle, CheckCircle, StickyNote, Send, GitMerge, Zap, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { Textarea } from '@/components/ui/textarea';
@@ -82,6 +82,8 @@ export default function ContactsPage() {
   const [search, setSearch] = useState('');
   const [filterTag, setFilterTag] = useState('');
   const [page, setPage] = useState(1);
+  const [sortBy, setSortBy] = useState('created_at');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [contactDialogOpen, setContactDialogOpen] = useState(false);
   const [editingContactId, setEditingContactId] = useState<string | null>(null);
   const [contactForm, setContactForm] = useState({ name: '', phone_number: '', email: '', company: '', source: 'MANUAL', tags: [] as string[] });
@@ -116,17 +118,34 @@ export default function ContactsPage() {
 
   // Queries
   const { data, isLoading } = useQuery({
-    queryKey: ['contacts', search, page, filterTag],
+    queryKey: ['contacts', search, page, filterTag, sortBy, sortOrder],
     queryFn: async () => {
       const params = new URLSearchParams({ page: String(page), limit: '20' });
       if (search) params.set('search', search);
       if (filterTag) params.set('tag', filterTag);
+      params.set('sort_by', sortBy);
+      params.set('sort_order', sortOrder);
       const { data } = await api.get(`/contacts?${params}`);
       return data;
     },
   });
   const contacts: Contact[] = data?.data || [];
   const meta = data?.meta;
+
+  const toggleSort = (field: string) => {
+    if (sortBy === field) {
+      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortBy(field);
+      setSortOrder('asc');
+    }
+    setPage(1);
+  };
+
+  const SortIcon = ({ field }: { field: string }) => {
+    if (sortBy !== field) return <ArrowUpDown className="h-3 w-3 ml-1 opacity-40" />;
+    return sortOrder === 'asc' ? <ArrowUp className="h-3 w-3 ml-1" /> : <ArrowDown className="h-3 w-3 ml-1" />;
+  };
 
   const { data: tags = [] } = useQuery({
     queryKey: ['tags'],
@@ -683,13 +702,21 @@ export default function ContactsPage() {
                         onChange={toggleSelectAll}
                       />
                     </TableHead>
-                    <TableHead>Kontak</TableHead>
-                    <TableHead className="hidden md:table-cell">Telepon</TableHead>
+                    <TableHead className="cursor-pointer select-none" onClick={() => toggleSort('name')}>
+                      <span className="flex items-center">Kontak<SortIcon field="name" /></span>
+                    </TableHead>
+                    <TableHead className="hidden md:table-cell cursor-pointer select-none" onClick={() => toggleSort('phone_number')}>
+                      <span className="flex items-center">Telepon<SortIcon field="phone_number" /></span>
+                    </TableHead>
                     <TableHead>Label</TableHead>
                     <TableHead className="hidden lg:table-cell">Stage</TableHead>
-                    <TableHead className="hidden lg:table-cell">Skor</TableHead>
-                    <TableHead className="hidden lg:table-cell">Dibuat</TableHead>
-                    <TableHead className="w-[80px]"></TableHead>
+                    <TableHead className="hidden lg:table-cell cursor-pointer select-none" onClick={() => toggleSort('lead_score')}>
+                      <span className="flex items-center">Skor<SortIcon field="lead_score" /></span>
+                    </TableHead>
+                    <TableHead className="hidden lg:table-cell cursor-pointer select-none" onClick={() => toggleSort('created_at')}>
+                      <span className="flex items-center">Dibuat<SortIcon field="created_at" /></span>
+                    </TableHead>
+                    <TableHead className="w-[80px]"><span className="sr-only">Aksi</span></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>

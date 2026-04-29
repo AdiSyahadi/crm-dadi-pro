@@ -30,6 +30,17 @@ class SlaController {
       next(err);
     }
   };
+
+  listBreached = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const page = req.query.page ? parseInt(req.query.page as string, 10) : 1;
+      const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 20;
+      const data = await slaService.listBreached(req.user!.organizationId, page, limit);
+      sendSuccess(res, data);
+    } catch (err) {
+      next(err);
+    }
+  };
 }
 
 export const slaController = new SlaController();

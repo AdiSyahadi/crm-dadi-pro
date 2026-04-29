@@ -30,6 +30,12 @@ import {
   DollarSign,
   Clock,
   MousePointerClick,
+  CreditCard,
+  RefreshCw,
+  CheckCircle2,
+  XCircle,
+  AlertTriangle,
+  Timer,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useConfirmStore } from '@/stores/confirm.store';
@@ -111,6 +117,10 @@ function DealDetailContent({ dealId }: { dealId: string }) {
             <Receipt className="h-3.5 w-3.5 mr-1.5" />
             Kwitansi
           </TabsTrigger>
+          <TabsTrigger value="payment" className="flex-1">
+            <CreditCard className="h-3.5 w-3.5 mr-1.5" />
+            Pembayaran
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="detail" className="space-y-3 mt-3">
@@ -165,6 +175,10 @@ function DealDetailContent({ dealId }: { dealId: string }) {
 
         <TabsContent value="receipts" className="mt-3">
           <DealReceiptsTab dealId={dealId} />
+        </TabsContent>
+
+        <TabsContent value="payment" className="mt-3">
+          <MidtransPaymentTab dealId={dealId} deal={deal} />
         </TabsContent>
       </Tabs>
     </>
@@ -410,6 +424,186 @@ function DealReceiptsTab({ dealId }: { dealId: string }) {
           </Card>
         );
       })}
+    </div>
+  );
+}
+
+/* ─── Midtrans Payment Tab ─── */
+
+const PAYMENT_STATUS_MAP: Record<string, { label: string; icon: typeof CheckCircle2; color: string }> = {
+  settlement: { label: 'Lunas', icon: CheckCircle2, color: 'text-emerald-600' },
+  capture: { label: 'Captured', icon: CheckCircle2, color: 'text-emerald-600' },
+  pending: { label: 'Menunggu Pembayaran', icon: Timer, color: 'text-amber-600' },
+  expire: { label: 'Kedaluwarsa', icon: XCircle, color: 'text-gray-500' },
+  cancel: { label: 'Dibatalkan', icon: XCircle, color: 'text-red-500' },
+  deny: { label: 'Ditolak', icon: AlertTriangle, color: 'text-red-600' },
+  refund: { label: 'Refund', icon: RefreshCw, color: 'text-blue-500' },
+  partial_refund: { label: 'Refund Sebagian', icon: RefreshCw, color: 'text-blue-500' },
+};
+
+function MidtransPaymentTab({ dealId, deal }: { dealId: string; deal: any }) {
+  const queryClient = useQueryClient();
+
+  const createLinkMutation = useMutation({
+    mutationFn: async () => {
+      const { data } = await api.post(`/deals/${dealId}/payment-link`);
+      return data.data as { snap_token: string; snap_url: string; order_id: string };
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['deal-detail', dealId] });
+      toast.success('Link pembayaran berhasil dibuat');
+    },
+    onError: (err: any) => {
+      toast.error(err.response?.data?.error?.message || 'Gagal membuat link pembayaran');
+    },
+  });
+
+  const checkStatusMutation = useMutation({
+    mutationFn: async () => {
+      const { data } = await api.get(`/deals/${dealId}/payment-status`);
+      return data.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['deal-detail', dealId] });
+      toast.success('Status pembayaran diperbarui');
+    },
+    onError: (err: any) => {
+      toast.error(err.response?.data?.error?.message || 'Gagal cek status');
+    },
+  });
+
+  const paymentStatus = deal.payment_status;
+  const snapUrl = deal.midtrans_snap_url;
+  const orderId = deal.midtrans_order_id;
+  const paymentType = deal.midtrans_payment_type;
+  const dealValue = Number(deal.value);
+
+  const statusInfo = paymentStatus ? PAYMENT_STATUS_MAP[paymentStatus] : null;
+  const StatusIcon = statusInfo?.icon || CreditCard;
+
+  const canCreateLink = !paymentStatus || paymentStatus === 'expire' || paymentStatus === 'cancel' || paymentStatus === 'deny';
+  const hasActiveLink = snapUrl && (paymentStatus === 'pending' || !paymentStatus);
+
+  const copySnapUrl = () => {
+    if (!snapUrl) return;
+    navigator.clipboard.writeText(snapUrl);
+    toast.success('Link pembayaran disalin ke clipboard');
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Payment Status Card */}
+      <Card>
+        <CardContent className="p-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${statusInfo ? 'bg-muted' : 'bg-muted/50'}`}>
+                <StatusIcon className={`h-5 w-5 ${statusInfo?.color || 'text-muted-foreground'}`} />
+              </div>
+              <div>
+                <p className="text-sm font-medium">
+                  {statusInfo?.label || 'Belum ada pembayaran'}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {orderId ? `Order: ${orderId}` : 'Buat link pembayaran Midtrans untuk deal ini'}
+                </p>
+              </div>
+            </div>
+            {paymentStatus && (
+              <Badge
+                variant={paymentStatus === 'settlement' || paymentStatus === 'capture' ? 'default' : 'secondary'}
+                className={`text-xs ${paymentStatus === 'settlement' || paymentStatus === 'capture' ? 'bg-emerald-500' : ''}`}
+              >
+                {statusInfo?.label || paymentStatus}
+              </Badge>
+            )}
+          </div>
+
+          {/* Payment details */}
+          {paymentType && (
+            <div className="mt-3 pt-3 border-t text-sm">
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Metode Pembayaran</span>
+                <span className="font-medium capitalize">{paymentType.replace(/_/g, ' ')}</span>
+              </div>
+              <div className="flex justify-between mt-1">
+                <span className="text-muted-foreground">Jumlah</span>
+                <span className="font-medium">{formatCurrency(dealValue)}</span>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Active Payment Link */}
+      {hasActiveLink && (
+        <Card className="border-amber-200 bg-amber-50/30">
+          <CardContent className="p-4">
+            <p className="text-sm font-medium mb-2">Link Pembayaran Aktif</p>
+            <div className="flex items-center gap-2">
+              <Input
+                value={snapUrl}
+                readOnly
+                className="text-xs font-mono bg-white"
+              />
+              <Button variant="outline" size="icon" className="shrink-0" onClick={copySnapUrl}>
+                <Copy className="h-4 w-4" />
+              </Button>
+              <Button variant="outline" size="icon" className="shrink-0" asChild>
+                <a href={snapUrl} target="_blank" rel="noopener noreferrer">
+                  <ExternalLink className="h-4 w-4" />
+                </a>
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground mt-2">
+              Kirim link ini ke customer untuk melakukan pembayaran via Midtrans.
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Action Buttons */}
+      <div className="flex gap-2">
+        {canCreateLink && dealValue > 0 && (
+          <Button
+            onClick={() => createLinkMutation.mutate()}
+            disabled={createLinkMutation.isPending}
+            className="flex-1"
+          >
+            {createLinkMutation.isPending ? (
+              <Loader2 className="h-4 w-4 animate-spin mr-2" />
+            ) : (
+              <CreditCard className="h-4 w-4 mr-2" />
+            )}
+            {snapUrl && (paymentStatus === 'expire' || paymentStatus === 'cancel' || paymentStatus === 'deny')
+              ? 'Buat Link Baru'
+              : 'Buat Link Pembayaran'}
+          </Button>
+        )}
+
+        {orderId && (
+          <Button
+            variant="outline"
+            onClick={() => checkStatusMutation.mutate()}
+            disabled={checkStatusMutation.isPending}
+          >
+            {checkStatusMutation.isPending ? (
+              <Loader2 className="h-4 w-4 animate-spin mr-2" />
+            ) : (
+              <RefreshCw className="h-4 w-4 mr-2" />
+            )}
+            Cek Status
+          </Button>
+        )}
+      </div>
+
+      {/* Warning if no value */}
+      {dealValue <= 0 && (
+        <div className="flex items-center gap-2 p-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-700 text-sm">
+          <AlertTriangle className="h-4 w-4 shrink-0" />
+          <p>Deal harus memiliki nilai (value) lebih dari 0 untuk membuat link pembayaran.</p>
+        </div>
+      )}
     </div>
   );
 }

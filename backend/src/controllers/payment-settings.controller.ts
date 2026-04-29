@@ -50,6 +50,7 @@ export class PaymentSettingsController {
         ...config,
         server_key: config.server_key ? '••••••••' + config.server_key.slice(-6) : '',
         server_key_set: !!config.server_key,
+        merchant_id: config.merchant_id || '',
       };
       res.json({ success: true, data: masked });
     } catch (error) {

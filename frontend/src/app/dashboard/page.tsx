@@ -1,11 +1,13 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import api from '@/lib/api';
 import { useAuthStore } from '@/stores/auth.store';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Switch } from '@/components/ui/switch';
 import {
   Users,
   MessageSquare,
@@ -22,6 +24,10 @@ import {
   UserPlus,
   MessageCircle,
   Settings,
+  SlidersHorizontal,
+  GripVertical,
+  Mail,
+  CalendarDays,
 } from 'lucide-react';
 import {
   AreaChart,
@@ -58,6 +64,29 @@ export default function DashboardPage() {
     if (typeof window !== 'undefined') return localStorage.getItem('onboarding_dismissed') === '1';
     return false;
   });
+
+  const DEFAULT_KPI_IDS = ['total_contacts', 'active_conversations', 'open_deals', 'won_revenue'];
+  const STORAGE_KEY = 'dashboard_kpi_visible';
+
+  const [visibleKpiIds, setVisibleKpiIds] = useState<string[]>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const stored = localStorage.getItem(STORAGE_KEY);
+        if (stored) return JSON.parse(stored);
+      } catch {}
+    }
+    return DEFAULT_KPI_IDS;
+  });
+  const [kpiSettingsOpen, setKpiSettingsOpen] = useState(false);
+
+  const toggleKpi = useCallback((id: string) => {
+    setVisibleKpiIds(prev => {
+      const next = prev.includes(id) ? prev.filter(k => k !== id) : [...prev, id];
+      if (next.length === 0) return prev;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+      return next;
+    });
+  }, []);
 
   const { data: dashboard, isLoading } = useQuery({
     queryKey: ['dashboard'],
@@ -108,8 +137,9 @@ export default function DashboardPage() {
     );
   }
 
-  const kpis = [
+  const ALL_KPIS = [
     {
+      id: 'total_contacts',
       title: 'Total Kontak',
       value: formatNumber(dashboard?.contacts?.total || 0),
       change: `+${dashboard?.contacts?.new_today || 0} hari ini`,
@@ -119,6 +149,7 @@ export default function DashboardPage() {
       up: true,
     },
     {
+      id: 'active_conversations',
       title: 'Percakapan Aktif',
       value: formatNumber(dashboard?.conversations?.open || 0),
       change: `${dashboard?.conversations?.total || 0} total`,
@@ -128,6 +159,7 @@ export default function DashboardPage() {
       up: true,
     },
     {
+      id: 'open_deals',
       title: 'Deals Terbuka',
       value: formatNumber(dashboard?.deals?.open || 0),
       change: `${dashboard?.deals?.won || 0} won`,
@@ -137,6 +169,7 @@ export default function DashboardPage() {
       up: true,
     },
     {
+      id: 'won_revenue',
       title: 'Revenue (Won)',
       value: formatCurrency(dashboard?.deals?.won_revenue || 0),
       change: `${dashboard?.deals?.won || 0} deals closed`,
@@ -145,7 +178,49 @@ export default function DashboardPage() {
       bg: 'bg-emerald-500/10',
       up: true,
     },
+    {
+      id: 'messages_today',
+      title: 'Pesan Hari Ini',
+      value: formatNumber(dashboard?.messages?.today || 0),
+      change: `${formatNumber(dashboard?.messages?.total || 0)} total`,
+      icon: Mail,
+      color: 'text-orange-500',
+      bg: 'bg-orange-500/10',
+      up: true,
+    },
+    {
+      id: 'messages_week',
+      title: 'Pesan Minggu Ini',
+      value: formatNumber(dashboard?.messages?.this_week || 0),
+      change: `${formatNumber(dashboard?.messages?.total || 0)} total`,
+      icon: Send,
+      color: 'text-violet-500',
+      bg: 'bg-violet-500/10',
+      up: true,
+    },
+    {
+      id: 'contacts_week',
+      title: 'Kontak Baru (Minggu)',
+      value: formatNumber(dashboard?.contacts?.new_this_week || 0),
+      change: `+${dashboard?.contacts?.new_today || 0} hari ini`,
+      icon: UserPlus,
+      color: 'text-cyan-500',
+      bg: 'bg-cyan-500/10',
+      up: true,
+    },
+    {
+      id: 'total_deals',
+      title: 'Total Deals',
+      value: formatNumber(dashboard?.deals?.total || 0),
+      change: `${dashboard?.deals?.open || 0} terbuka`,
+      icon: CalendarDays,
+      color: 'text-pink-500',
+      bg: 'bg-pink-500/10',
+      up: true,
+    },
   ];
+
+  const visibleKpis = ALL_KPIS.filter(k => visibleKpiIds.includes(k.id));
 
   return (
     <div className="space-y-6">
@@ -229,9 +304,51 @@ export default function DashboardPage() {
       })()}
 
       {/* KPI Cards */}
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-muted-foreground">{visibleKpis.length} KPI ditampilkan</p>
+        <Dialog open={kpiSettingsOpen} onOpenChange={setKpiSettingsOpen}>
+          <DialogTrigger asChild>
+            <Button variant="outline" size="sm" className="gap-1.5">
+              <SlidersHorizontal className="h-3.5 w-3.5" />
+              Atur KPI
+            </Button>
+          </DialogTrigger>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Pengaturan KPI Dashboard</DialogTitle>
+            </DialogHeader>
+            <p className="text-sm text-muted-foreground mb-3">Pilih metrik yang ingin ditampilkan di dashboard.</p>
+            <div className="space-y-3">
+              {ALL_KPIS.map((kpi) => (
+                <div key={kpi.id} className="flex items-center justify-between rounded-lg border p-3">
+                  <div className="flex items-center gap-3">
+                    <div className={`flex h-8 w-8 items-center justify-center rounded-lg ${kpi.bg}`}>
+                      <kpi.icon className={`h-4 w-4 ${kpi.color}`} />
+                    </div>
+                    <span className="text-sm font-medium">{kpi.title}</span>
+                  </div>
+                  <Switch
+                    checked={visibleKpiIds.includes(kpi.id)}
+                    onCheckedChange={() => toggleKpi(kpi.id)}
+                  />
+                </div>
+              ))}
+            </div>
+            <div className="flex justify-between mt-4">
+              <Button variant="ghost" size="sm" onClick={() => { setVisibleKpiIds(DEFAULT_KPI_IDS); localStorage.setItem(STORAGE_KEY, JSON.stringify(DEFAULT_KPI_IDS)); }}>
+                Reset Default
+              </Button>
+              <Button size="sm" onClick={() => setKpiSettingsOpen(false)}>
+                Selesai
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      </div>
+
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {kpis.map((kpi) => (
-          <Card key={kpi.title} className="hover:shadow-md transition-shadow">
+        {visibleKpis.map((kpi) => (
+          <Card key={kpi.id} className="hover:shadow-md transition-shadow">
             <CardContent className="p-6">
               <div className="flex items-center justify-between">
                 <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${kpi.bg}`}>

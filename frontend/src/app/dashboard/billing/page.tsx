@@ -232,12 +232,12 @@ export default function BillingPage() {
                   : 'Nikmati fitur lengkap sesuai paket Anda'}
               </p>
             </div>
-            <Link href="/dashboard/pricing">
-              <Button variant="outline">
+            <Button variant="outline" asChild>
+              <Link href="/dashboard/pricing">
                 <ArrowUpRight className="h-4 w-4 mr-2" />
                 Lihat Paket Lain
-              </Button>
-            </Link>
+              </Link>
+            </Button>
           </div>
         </CardContent>
       </Card>

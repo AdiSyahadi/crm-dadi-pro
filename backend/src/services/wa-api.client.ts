@@ -260,4 +260,19 @@ export class WAApiClient {
     const { data } = await this.client.delete(`/webhook/config/${instanceId}`);
     return data;
   }
+
+  // POST /instances/:instanceId/reconnect — ask WA API to reconnect an instance
+  async reconnectInstance(instanceId: string) {
+    try {
+      const { data } = await this.client.post(`/instances/${instanceId}/reconnect`);
+      return data;
+    } catch (err: any) {
+      // Some WA APIs use restart instead of reconnect
+      if (err.response?.status === 404) {
+        const { data } = await this.client.post(`/instances/${instanceId}/restart`);
+        return data;
+      }
+      throw err;
+    }
+  }
 }

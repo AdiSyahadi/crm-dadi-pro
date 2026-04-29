@@ -59,6 +59,7 @@ model Organization {
   receipts           Receipt[]
   receipt_config     Json?
   tasks              Task[]
+  appointments       Appointment[]
 
   @@map("organizations")
 }
@@ -239,6 +240,8 @@ model User {
   contact_notes              ContactNote[]
   created_tasks              Task[] @relation("TaskCreatedBy")
   assigned_tasks             Task[] @relation("TaskAssignedTo")
+  created_appointments       Appointment[] @relation("AppointmentCreatedBy")
+  assigned_appointments      Appointment[] @relation("AppointmentAssignedTo")
 
   @@unique([organization_id, email])
   @@map("users")
@@ -408,6 +411,7 @@ model Contact {
   deals         Deal[]
   contact_notes ContactNote[]
   tasks         Task[]
+  appointments  Appointment[]
 
   @@unique([organization_id, phone_number])
   @@index([organization_id, stage])
@@ -818,6 +822,12 @@ model Deal {
   custom_fields Json?
   is_archived   Boolean @default(false)
 
+  payment_status        String?   // pending, settlement, expire, cancel, deny, refund
+  midtrans_order_id     String?   @unique
+  midtrans_snap_token   String?
+  midtrans_snap_url     String?   @db.Text
+  midtrans_payment_type String?
+
   rotten_notified_at DateTime?
 
   created_at DateTime @default(now())
@@ -1142,6 +1152,53 @@ model ActivityLog {
   @@index([organization_id, created_at])
   @@index([entity_type, entity_id])
   @@map("activity_logs")
+}
+
+// ============================================
+// APPOINTMENT (Scheduling & Calendar)
+// ============================================
+
+enum AppointmentStatus {
+  SCHEDULED
+  CONFIRMED
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+model Appointment {
+  id              String @id @default(uuid())
+  organization_id String
+  organization    Organization @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+
+  contact_id String?
+  contact    Contact? @relation(fields: [contact_id], references: [id], onDelete: SetNull)
+
+  created_by_id String
+  created_by    User @relation("AppointmentCreatedBy", fields: [created_by_id], references: [id])
+
+  assigned_to_id String?
+  assigned_to    User? @relation("AppointmentAssignedTo", fields: [assigned_to_id], references: [id])
+
+  title       String
+  description String?  @db.Text
+  location    String?
+  start_time  DateTime
+  end_time    DateTime
+  status      AppointmentStatus @default(SCHEDULED)
+  notes       String?  @db.Text
+
+  reminder_at   DateTime?
+  reminder_sent Boolean @default(false)
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@index([organization_id, start_time])
+  @@index([organization_id, status])
+  @@index([assigned_to_id])
+  @@index([contact_id])
+  @@map("appointments")
 }
 
 // ============================================

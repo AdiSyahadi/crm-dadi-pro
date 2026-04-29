@@ -130,11 +130,12 @@ export class AnalyticsService {
 
     const performance = await Promise.all(
       agents.map(async (agent) => {
-        const [assignedConversations, resolvedConversations, sentMessages, wonDeals] = await Promise.all([
+        const [assignedConversations, resolvedConversations, sentMessages, wonDeals, pendingTasks] = await Promise.all([
           prisma.conversation.count({ where: { organization_id: organizationId, assigned_to_user_id: agent.id, status: 'OPEN' } }),
           prisma.conversation.count({ where: { organization_id: organizationId, resolved_by_id: agent.id } }),
           prisma.message.count({ where: { organization_id: organizationId, sent_by_user_id: agent.id } }),
           prisma.deal.count({ where: { organization_id: organizationId, assigned_to_id: agent.id, closed_status: 'WON' } }),
+          prisma.task.count({ where: { organization_id: organizationId, assigned_to_id: agent.id, status: { in: ['TODO', 'IN_PROGRESS'] } } }),
         ]);
 
         return {
@@ -143,6 +144,7 @@ export class AnalyticsService {
           resolved_conversations: resolvedConversations,
           sent_messages: sentMessages,
           won_deals: wonDeals,
+          pending_tasks: pendingTasks,
         };
       })
     );

@@ -13,5 +13,6 @@ router.put('/settings', authorize('OWNER', 'ADMIN'), slaController.updateSetting
 
 // Stats (MANAGEMENT)
 router.get('/stats', authorize('OWNER', 'ADMIN', 'SUPERVISOR'), slaController.getStats);
+router.get('/breached', authorize('OWNER', 'ADMIN', 'SUPERVISOR'), slaController.listBreached);
 
 export default router;

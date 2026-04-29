@@ -7,6 +7,8 @@ import { useConfirmStore } from '@/stores/confirm.store';
 import { FeatureGate } from '@/components/feature-gate';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -36,9 +38,14 @@ import {
   GripVertical,
   User,
   AlertTriangle,
+  Search,
+  ChevronLeft,
+  ChevronRight,
+  Download,
+  CreditCard,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { cn } from '@/lib/utils';
+import { cn, downloadCsv } from '@/lib/utils';
 import { DealDetailDialog } from '@/components/deal-detail-dialog';
 
 const STAGES = [
@@ -61,6 +68,8 @@ interface Deal {
   contact: { id: string; name: string; phone_number: string } | null;
   assigned_to: { id: string; name: string } | null;
   closed_status: string | null;
+  payment_status: string | null;
+  midtrans_snap_url: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -73,6 +82,54 @@ export default function DealsPage() {
   const [view, setView] = useState<'pipeline' | 'list'>('pipeline');
   const [detailDealId, setDetailDealId] = useState<string | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const [filterStage, setFilterStage] = useState('all');
+  const [filterStatus, setFilterStatus] = useState('all');
+  const [page, setPage] = useState(1);
+  const limit = 20;
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkLoading, setBulkLoading] = useState(false);
+  const [sortBy, setSortBy] = useState('created_at');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+  const [lostDialogDealId, setLostDialogDealId] = useState<string | null>(null);
+  const [lostReason, setLostReason] = useState('');
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleAll = () => {
+    if (selectedIds.size === deals.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(deals.map((d) => d.id)));
+    }
+  };
+
+  const bulkAction = async (action: 'stage' | 'won' | 'lost' | 'delete', stage?: string) => {
+    if (selectedIds.size === 0) return;
+    setBulkLoading(true);
+    try {
+      const ids = Array.from(selectedIds);
+      for (const id of ids) {
+        if (action === 'stage' && stage) await api.post(`/deals/${id}/stage`, { stage });
+        if (action === 'won') await api.post(`/deals/${id}/won`, { won_notes: 'Bulk closed' });
+        if (action === 'lost') await api.post(`/deals/${id}/lost`, { lost_reason: 'Bulk closed' });
+        if (action === 'delete') await api.delete(`/deals/${id}`);
+      }
+      queryClient.invalidateQueries({ queryKey: ['deals'] });
+      toast.success(`${selectedIds.size} deal berhasil diproses`);
+      setSelectedIds(new Set());
+    } catch {
+      toast.error('Sebagian operasi gagal');
+    } finally {
+      setBulkLoading(false);
+    }
+  };
 
   const openDealDetail = (id: string) => {
     setDetailDealId(id);
@@ -96,13 +153,28 @@ export default function DealsPage() {
     return daysSince >= rottenDays;
   };
 
-  const { data: deals = [], isLoading } = useQuery({
-    queryKey: ['deals'],
+  const { data: dealsData, isLoading } = useQuery({
+    queryKey: ['deals', search, filterStage, filterStatus, page, sortBy, sortOrder],
     queryFn: async () => {
-      const { data } = await api.get('/deals?limit=100');
-      return data.data as Deal[];
+      const params = new URLSearchParams();
+      params.set('page', String(page));
+      params.set('limit', String(view === 'pipeline' ? 100 : limit));
+      if (search) params.set('search', search);
+      if (filterStage !== 'all') params.set('stage', filterStage);
+      if (filterStatus === 'WON') params.set('closed_status', 'WON');
+      if (filterStatus === 'LOST') params.set('closed_status', 'LOST');
+      if (filterStatus === 'open') {
+        // Open means no closed_status — backend default
+      }
+      params.set('sort_by', sortBy);
+      params.set('sort_order', sortOrder);
+      const { data } = await api.get(`/deals?${params.toString()}`);
+      return data as { data: Deal[]; meta: { page: number; limit: number; total: number; totalPages: number } };
     },
   });
+
+  const deals = dealsData?.data ?? [];
+  const meta = dealsData?.meta;
 
   const { data: contacts = [] } = useQuery({
     queryKey: ['contacts-for-deal'],
@@ -148,12 +220,14 @@ export default function DealsPage() {
   });
 
   const markLostMutation = useMutation({
-    mutationFn: async (id: string) => {
-      await api.post(`/deals/${id}/lost`, { lost_reason: 'Lost via pipeline' });
+    mutationFn: async ({ id, reason }: { id: string; reason: string }) => {
+      await api.post(`/deals/${id}/lost`, { lost_reason: reason || 'Tidak ada alasan' });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['deals'] });
       toast.success('Deal ditandai LOST');
+      setLostDialogDealId(null);
+      setLostReason('');
     },
   });
 
@@ -172,6 +246,9 @@ export default function DealsPage() {
           <p className="text-sm text-muted-foreground">Pipeline dan closing tracker</p>
         </div>
         <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => { downloadCsv('/export/deals', 'deals.csv').then(() => toast.success('Export berhasil')).catch(() => toast.error('Gagal export')); }}>
+            <Download className="h-4 w-4 mr-2" /> Export CSV
+          </Button>
           <div className="flex rounded-lg border p-0.5">
             <Button
               variant={view === 'pipeline' ? 'default' : 'ghost'}
@@ -262,6 +339,54 @@ export default function DealsPage() {
         </div>
       </div>
 
+      {/* Search + Filter Bar */}
+      <div className="flex flex-col sm:flex-row gap-3">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Cari deal, nomor, atau kontak..."
+            className="pl-9"
+            value={search}
+            onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+          />
+        </div>
+        <Select value={filterStage} onValueChange={(v) => { setFilterStage(v); setPage(1); }}>
+          <SelectTrigger className="w-full sm:w-[160px]">
+            <SelectValue placeholder="Semua Tahap" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Semua Tahap</SelectItem>
+            {STAGES.map((s) => (
+              <SelectItem key={s.key} value={s.key}>{s.label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={filterStatus} onValueChange={(v) => { setFilterStatus(v); setPage(1); }}>
+          <SelectTrigger className="w-full sm:w-[140px]">
+            <SelectValue placeholder="Status" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Semua Status</SelectItem>
+            <SelectItem value="open">Open</SelectItem>
+            <SelectItem value="WON">Won</SelectItem>
+            <SelectItem value="LOST">Lost</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={`${sortBy}:${sortOrder}`} onValueChange={(v) => { const [f, o] = v.split(':'); setSortBy(f); setSortOrder(o as 'asc' | 'desc'); setPage(1); }}>
+          <SelectTrigger className="w-full sm:w-[160px]">
+            <SelectValue placeholder="Urutkan" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="created_at:desc">Terbaru</SelectItem>
+            <SelectItem value="created_at:asc">Terlama</SelectItem>
+            <SelectItem value="value:desc">Nilai Tertinggi</SelectItem>
+            <SelectItem value="value:asc">Nilai Terendah</SelectItem>
+            <SelectItem value="updated_at:desc">Terakhir Update</SelectItem>
+            <SelectItem value="expected_close_date:asc">Close Terdekat</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
       {/* KPI Row */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <Card>
@@ -350,6 +475,12 @@ export default function DealsPage() {
                             {deal.contact && (
                               <p className="text-xs text-muted-foreground mt-1">{deal.contact.name}</p>
                             )}
+                            {deal.payment_status && (
+                              <Badge variant="outline" className={cn('text-[10px] mt-1 gap-1', deal.payment_status === 'settlement' ? 'border-emerald-300 text-emerald-600' : deal.payment_status === 'pending' ? 'border-amber-300 text-amber-600' : 'border-gray-300 text-gray-500')}>
+                                <CreditCard className="h-2.5 w-2.5" />
+                                {deal.payment_status === 'settlement' ? 'Lunas' : deal.payment_status === 'pending' ? 'Menunggu' : deal.payment_status}
+                              </Badge>
+                            )}
                             <div className="flex items-center gap-1 mt-2" onClick={(e) => e.stopPropagation()}>
                               {/* Stage navigation buttons */}
                               {stage.key !== 'QUALIFICATION' && (
@@ -391,7 +522,7 @@ export default function DealsPage() {
                                     variant="ghost"
                                     size="sm"
                                     className="h-6 text-[10px] px-2 text-red-600"
-                                    onClick={() => openConfirm({ title: 'Tandai deal ini sebagai Lost?', description: 'Deal akan ditandai sebagai kalah/gagal.', confirmText: 'Ya, Lost', onConfirm: () => markLostMutation.mutate(deal.id) })}
+                                    onClick={() => { setLostDialogDealId(deal.id); setLostReason(''); }}
                                   >
                                     ✗ Lost
                                   </Button>
@@ -416,10 +547,44 @@ export default function DealsPage() {
       ) : (
         /* List View */
         <Card>
+          {/* Bulk Action Bar */}
+          {selectedIds.size > 0 && (
+            <div className="flex items-center gap-2 p-3 bg-primary/5 border-b">
+              <span className="text-sm font-medium">{selectedIds.size} dipilih</span>
+              <Select onValueChange={(v) => openConfirm({ title: `Pindahkan ${selectedIds.size} deal?`, description: `Semua deal terpilih akan dipindah ke tahap baru.`, confirmText: 'Pindahkan', onConfirm: () => bulkAction('stage', v) })}>
+                <SelectTrigger className="w-[140px] h-8 text-xs">
+                  <SelectValue placeholder="Pindah Stage" />
+                </SelectTrigger>
+                <SelectContent>
+                  {STAGES.map((s) => (
+                    <SelectItem key={s.key} value={s.key}>{s.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button size="sm" variant="outline" className="h-8 text-xs text-emerald-600" disabled={bulkLoading} onClick={() => openConfirm({ title: `Tandai ${selectedIds.size} deal sebagai Won?`, confirmText: 'Ya, Won', onConfirm: () => bulkAction('won') })}>
+                ✓ Won
+              </Button>
+              <Button size="sm" variant="outline" className="h-8 text-xs text-red-600" disabled={bulkLoading} onClick={() => openConfirm({ title: `Tandai ${selectedIds.size} deal sebagai Lost?`, confirmText: 'Ya, Lost', onConfirm: () => bulkAction('lost') })}>
+                ✗ Lost
+              </Button>
+              <Button size="sm" variant="outline" className="h-8 text-xs text-destructive" disabled={bulkLoading} onClick={() => openConfirm({ title: `Hapus ${selectedIds.size} deal?`, description: 'Aksi ini tidak bisa dibatalkan.', confirmText: 'Hapus', variant: 'destructive', onConfirm: () => bulkAction('delete') })}>
+                Hapus
+              </Button>
+              {bulkLoading && <Loader2 className="h-4 w-4 animate-spin" />}
+            </div>
+          )}
           <CardContent className="p-0">
             <div className="divide-y">
+              {/* Select All */}
+              <div className="flex items-center gap-3 p-3 bg-muted/20">
+                <Checkbox checked={deals.length > 0 && selectedIds.size === deals.length} onCheckedChange={toggleAll} />
+                <span className="text-xs text-muted-foreground">Pilih semua</span>
+              </div>
               {deals.map((deal) => (
-                <div key={deal.id} className={cn('flex items-center gap-4 p-4 hover:bg-muted/30 transition-colors cursor-pointer', isRotten(deal) && 'bg-amber-50/50')} onClick={() => openDealDetail(deal.id)}>
+                <div key={deal.id} className={cn('flex items-center gap-4 p-4 hover:bg-muted/30 transition-colors cursor-pointer', isRotten(deal) && 'bg-amber-50/50', selectedIds.has(deal.id) && 'bg-primary/5')} onClick={() => openDealDetail(deal.id)}>
+                  <div onClick={(e) => e.stopPropagation()}>
+                    <Checkbox checked={selectedIds.has(deal.id)} onCheckedChange={() => toggleSelect(deal.id)} />
+                  </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       {isRotten(deal) && <AlertTriangle className="h-3.5 w-3.5 text-amber-500 shrink-0" />}
@@ -431,6 +596,12 @@ export default function DealsPage() {
                     </p>
                   </div>
                   <p className="text-sm font-semibold">{formatCurrency(Number(deal.value))}</p>
+                  {deal.payment_status && (
+                    <Badge variant="outline" className={cn('text-[10px] gap-1', deal.payment_status === 'settlement' ? 'border-emerald-300 text-emerald-600' : deal.payment_status === 'pending' ? 'border-amber-300 text-amber-600' : 'border-gray-300 text-gray-500')}>
+                      <CreditCard className="h-2.5 w-2.5" />
+                      {deal.payment_status === 'settlement' ? 'Lunas' : deal.payment_status === 'pending' ? 'Menunggu' : deal.payment_status}
+                    </Badge>
+                  )}
                   {deal.closed_status && (
                     <Badge className={cn(
                       'text-[10px]',
@@ -448,6 +619,36 @@ export default function DealsPage() {
           </CardContent>
         </Card>
       )}
+
+      {/* Pagination */}
+      {view === 'list' && meta && meta.totalPages > 1 && (
+        <div className="flex items-center justify-between">
+          <p className="text-sm text-muted-foreground">
+            Menampilkan {deals.length} dari {meta.total} deal
+          </p>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={page <= 1}
+              onClick={() => setPage(page - 1)}
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <span className="text-sm">
+              {page} / {meta.totalPages}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={page >= meta.totalPages}
+              onClick={() => setPage(page + 1)}
+            >
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
 
     <DealDetailDialog
@@ -455,6 +656,35 @@ export default function DealsPage() {
       onOpenChange={setDetailOpen}
       dealId={detailDealId}
     />
+
+    <Dialog open={!!lostDialogDealId} onOpenChange={(open) => { if (!open) { setLostDialogDealId(null); setLostReason(''); } }}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Tandai Deal sebagai Lost</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3">
+          <Label htmlFor="lost-reason">Alasan Kalah / Gagal</Label>
+          <Textarea
+            id="lost-reason"
+            placeholder="Contoh: Harga terlalu mahal, kompetitor menawarkan lebih murah..."
+            value={lostReason}
+            onChange={(e) => setLostReason(e.target.value)}
+            rows={3}
+          />
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" size="sm" onClick={() => { setLostDialogDealId(null); setLostReason(''); }}>Batal</Button>
+            <Button
+              size="sm"
+              variant="destructive"
+              disabled={markLostMutation.isPending}
+              onClick={() => { if (lostDialogDealId) markLostMutation.mutate({ id: lostDialogDealId, reason: lostReason }); }}
+            >
+              {markLostMutation.isPending ? 'Memproses...' : 'Ya, Tandai Lost'}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
     </FeatureGate>
   );
 }

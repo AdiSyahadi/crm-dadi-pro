@@ -88,12 +88,16 @@ export class PaymentSettingsService {
 
   /** Bulk upsert Midtrans config */
   async saveMidtransConfig(config: {
+    merchant_id?: string;
     server_key?: string;
     client_key?: string;
     environment?: string; // 'sandbox' | 'production'
     is_enabled?: string;  // 'true' | 'false'
   }) {
     const ops: Promise<any>[] = [];
+    if (config.merchant_id !== undefined) {
+      ops.push(this.upsertPaymentConfig('midtrans_merchant_id', config.merchant_id, 'Midtrans Merchant ID'));
+    }
     if (config.server_key !== undefined) {
       ops.push(this.upsertPaymentConfig('midtrans_server_key', config.server_key, 'Midtrans Server Key'));
     }
@@ -119,6 +123,7 @@ export class PaymentSettingsService {
     for (const r of rows) map[r.key] = r.value;
 
     return {
+      merchant_id: map['midtrans_merchant_id'] || '',
       server_key: map['midtrans_server_key'] || '',
       client_key: map['midtrans_client_key'] || '',
       environment: map['midtrans_environment'] || 'sandbox',

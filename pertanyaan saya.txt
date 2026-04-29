@@ -1,0 +1,27 @@
+HASIL AUDIT CRM-DADI
+A. MASALAH UX (Existing Features yang Belum User-Friendly)
+#	Masalah	Halaman	Severity	Effort
+1	Deals tidak ada Search & Filter — harus scroll manual cari deal	Deals	🔴 HIGH	SMALL (1-2 patch)
+2	Tabel tidak responsive mobile — kolom terpotong di HP	Tasks, Chat, Receipts	🔴 HIGH	SMALL (2-3 patch)
+3	Deals tidak ada Pagination — semua deal di-load sekaligus	Deals	🟡 MED	SMALL (1 patch)
+4	Tidak ada Sort di hampir semua tabel (kontak, tasks, receipts)	Banyak	🟡 MED	MEDIUM (3-4 patch)
+5	SLA tidak ada list breach — cuma statistik, tidak actionable	SLA	🟡 MED	SMALL (2 patch)
+6	CSAT tidak ada filter waktu — hanya lihat semua data sekaligus	CSAT	🟡 MED	SMALL (1 patch)
+7	Scheduled Messages tidak ada search/filter	Scheduled Msg	🟡 MED	SMALL (1 patch)
+8	Sidebar item PRO badge klik tanpa efek — tidak ada upgrade flow	Sidebar	🟡 MED	SMALL (1 patch)
+9	Form dialog terlalu besar di mobile	Broadcast, Settings	🟢 LOW	SMALL (1-2 patch)
+10	Template tidak ada filter kategori	Templates	🟢 LOW	SMALL (1 patch)
+B. FITUR MISSING (Yang Harusnya Ada di CRM)
+#	Fitur	Deskripsi	Priority	Effort	Impact
+1	Bulk Operations di Deals	Select multiple deals → pindah stage/assign/delete sekaligus	🔴 HIGH	SMALL (2-3 patch)	Hemat 30 menit/hari
+2	Contact Notes di halaman kontak	Quick-add note tanpa buka detail	🔴 HIGH	SMALL (1-2 patch)	Sales flow lebih cepat
+3	Deal Lost Reason	Wajib isi alasan saat close as Lost	🔴 HIGH	SMALL (2 patch)	Data insights kenapa gagal
+4	Activity Log / Audit Trail yang visible	Timeline semua aksi user di sidebar/drawer	🟡 MED	MEDIUM (3-4 patch)	Transparansi tim
+5	Conversation Tags	Label conversation (bukan cuma kontak)	🟡 MED	MEDIUM (3-5 patch)	Organisasi chat lebih baik
+6	Date Shortcuts di date pickers	"Hari ini", "Besok", "Minggu depan"	🟡 MED	SMALL (1-2 patch)	Reduce klik 50%
+7	Dashboard KPI customable	Pilih metric mana yang mau ditampilkan	🟡 MED	MEDIUM (4-5 patch)	Personalisasi
+8	Team Workload View	Visual card per agent: berapa chat aktif, deal, task	🟡 MED	MEDIUM (3-4 patch)	Supervisor visibility
+9	Export di semua list halaman	Tombol Export CSV yang konsisten di semua page	🟢 LOW	MEDIUM (3-4 patch)	Data portability
+10	Appointment / Jadwal Meeting	Booking meeting dengan customer dari chat	🟢 LOW	LARGE (6-8 patch)	Enterprise value
+
+Apakah semua ini sudah kamu kerjakan dengan baik dan mematuhi aturan kerja?

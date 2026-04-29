@@ -32,6 +32,8 @@ import paymentSettingsRoutes from './payment-settings.routes';
 import trackedLinkRoutes from './tracked-link.routes';
 import receiptRoutes from './receipt.routes';
 import taskRoutes from './task.routes';
+import activityLogRoutes from './activity-log.routes';
+import appointmentRoutes from './appointment.routes';
 
 const router = Router();
 
@@ -76,6 +78,8 @@ router.use('/internal-chat', internalChatRoutes);
 router.use('/tracked-links', trackedLinkRoutes);
 router.use('/receipts', receiptRoutes);
 router.use('/tasks', taskRoutes);
+router.use('/activity-logs', activityLogRoutes);
+router.use('/appointments', appointmentRoutes);
 
 // Admin routes (Super Admin only)
 router.use('/admin/plans', adminPlanRoutes);

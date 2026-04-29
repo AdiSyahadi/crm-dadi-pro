@@ -5,6 +5,7 @@ import { messageService } from '../services/message.service';
 import { prisma } from '../config/database';
 import { conversationService } from '../services/conversation.service';
 import { paymentCallbackService } from '../services/payment-callback.service';
+import { midtransService } from '../services/midtrans.service';
 import crypto from 'crypto';
 
 export class WebhookController {
@@ -246,6 +247,36 @@ export class WebhookController {
     } catch (err: any) {
       console.error(`❌ payment-callback failed: ${err.message}`);
       res.status(500).json({ error: err.message || 'Failed to process payment' });
+    }
+  }
+
+  /**
+   * POST /api/webhook/midtrans
+   *
+   * Midtrans payment notification handler (HTTP Notification).
+   * No auth header — verified by SHA-512 signature in the notification body.
+   * Midtrans sends this automatically when transaction status changes.
+   */
+  async handleMidtransNotification(req: Request, res: Response, _next: NextFunction): Promise<void> {
+    // Respond 200 immediately — Midtrans retries if non-200
+    res.status(200).json({ received: true });
+
+    try {
+      const notification = req.body;
+
+      if (!notification.order_id || !notification.transaction_status || !notification.signature_key) {
+        console.warn('⚠️ Midtrans notification: missing required fields');
+        return;
+      }
+
+      console.log(`📥 Midtrans webhook: order=${notification.order_id}, status=${notification.transaction_status}`);
+
+      const result = await midtransService.handleNotification(notification);
+      if (!result.success) {
+        console.warn(`⚠️ Midtrans notification processing: ${result.message}`);
+      }
+    } catch (error: any) {
+      console.error(`❌ Midtrans notification error: ${error.message}`);
     }
   }
 }

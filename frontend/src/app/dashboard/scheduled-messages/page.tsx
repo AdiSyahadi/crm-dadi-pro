@@ -54,10 +54,12 @@ import {
   XCircle,
   Tag,
   Info,
+  ArrowUpDown,
+  Download,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
-import { cn } from '@/lib/utils';
+import { cn, downloadCsv } from '@/lib/utils';
 
 const DAY_LABELS = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
 const DAY_LABELS_FULL = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
@@ -164,6 +166,9 @@ export default function ScheduledMessagesPage() {
   const [contactSearch, setContactSearch] = useState('');
   const [addRecipientDialogOpen, setAddRecipientDialogOpen] = useState(false);
   const [addRecipientSearch, setAddRecipientSearch] = useState('');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [sortField, setSortField] = useState('created_at:desc');
 
   // Form state
   const [formName, setFormName] = useState('');
@@ -440,15 +445,20 @@ export default function ScheduledMessagesPage() {
           <h1 className="text-2xl font-bold">Jadwal Pesan</h1>
           <p className="text-sm text-muted-foreground">Kirim pesan otomatis berulang ke kontak WhatsApp</p>
         </div>
-        <Button
-          onClick={() => {
-            resetForm();
-            setDialogOpen(true);
-          }}
-        >
-          <Plus className="h-4 w-4 mr-2" />
-          Buat Jadwal Baru
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={() => { downloadCsv('/export/scheduled-messages', 'jadwal-pesan.csv').then(() => toast.success('Export berhasil')).catch(() => toast.error('Gagal export')); }}>
+            <Download className="h-4 w-4 mr-2" /> Export CSV
+          </Button>
+          <Button
+            onClick={() => {
+              resetForm();
+              setDialogOpen(true);
+            }}
+          >
+            <Plus className="h-4 w-4 mr-2" />
+            Buat Jadwal Baru
+          </Button>
+        </div>
       </div>
 
       {/* Info template variables */}
@@ -466,6 +476,35 @@ export default function ScheduledMessagesPage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Search + Filter */}
+      <div className="flex flex-col sm:flex-row gap-3">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input placeholder="Cari nama jadwal..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="pl-9" />
+        </div>
+        <Select value={statusFilter} onValueChange={setStatusFilter}>
+          <SelectTrigger className="w-[160px]">
+            <SelectValue placeholder="Status" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Semua</SelectItem>
+            <SelectItem value="active">Aktif</SelectItem>
+            <SelectItem value="inactive">Nonaktif</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={sortField} onValueChange={setSortField}>
+          <SelectTrigger className="w-[160px]">
+            <SelectValue placeholder="Urutkan" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="created_at:desc">Terbaru</SelectItem>
+            <SelectItem value="created_at:asc">Terlama</SelectItem>
+            <SelectItem value="name:asc">Nama A-Z</SelectItem>
+            <SelectItem value="name:desc">Nama Z-A</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
 
       {/* Schedule list */}
       <Card>
@@ -495,7 +534,18 @@ export default function ScheduledMessagesPage() {
                   </TableCell>
                 </TableRow>
               ) : (
-                schedules.map((s) => (
+                schedules.filter((s) => {
+                  if (searchTerm && !s.name.toLowerCase().includes(searchTerm.toLowerCase())) return false;
+                  if (statusFilter === 'active' && !s.is_active) return false;
+                  if (statusFilter === 'inactive' && s.is_active) return false;
+                  return true;
+                }).sort((a, b) => {
+                  const [field, order] = sortField.split(':');
+                  const dir = order === 'asc' ? 1 : -1;
+                  if (field === 'name') return dir * a.name.localeCompare(b.name);
+                  if (field === 'created_at') return dir * (new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+                  return 0;
+                }).map((s) => (
                   <TableRow key={s.id} className="cursor-pointer hover:bg-muted/50" onClick={() => setDetailId(s.id)}>
                     <TableCell>
                       <div>
@@ -644,7 +694,7 @@ export default function ScheduledMessagesPage() {
               {formMediaFile ? (
                 <div className="flex items-center gap-2 p-2 bg-muted rounded-lg mt-1">
                   {formMediaPreview ? (
-                    <img src={formMediaPreview} alt="" className="h-12 w-12 rounded object-cover" />
+                    <img src={formMediaPreview} alt="Preview media terjadwal" className="h-12 w-12 rounded object-cover" />
                   ) : (
                     <div className="h-12 w-12 rounded bg-muted-foreground/10 flex items-center justify-center">
                       {formMediaFile.type.startsWith('video/') ? <Film className="h-5 w-5" /> : formMediaFile.type.startsWith('audio/') ? <Music className="h-5 w-5" /> : <FileText className="h-5 w-5" />}

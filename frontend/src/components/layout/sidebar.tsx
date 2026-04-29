@@ -29,7 +29,8 @@ import {
   MessageCircle,
   Receipt,
   ClipboardCheck,
-  TrendingUp,
+  History,
+  CalendarCheck,
 } from 'lucide-react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
@@ -73,12 +74,13 @@ const navItems: NavItem[] = [
   { label: 'Quick Reply', href: '/dashboard/quick-replies', icon: Zap, roles: ALL_ROLES },
   { label: 'Instansi WA', href: '/dashboard/instances', icon: Wifi, roles: ADMIN_UP },
   { label: 'Analitik', href: '/dashboard/analytics', icon: BarChart3, roles: MANAGEMENT },
-  { label: 'Forecasting', href: '/dashboard/forecasting', icon: TrendingUp, roles: MANAGEMENT, requiredFeature: 'deals' as keyof PlanFeatures },
   { label: 'CSAT', href: '/dashboard/csat', icon: Star, roles: MANAGEMENT },
   { label: 'SLA', href: '/dashboard/sla', icon: Timer, roles: MANAGEMENT },
   { label: 'Hari Libur', href: '/dashboard/holidays', icon: CalendarDays, roles: ADMIN_UP },
   { label: 'Chatbot', href: '/dashboard/chatbot', icon: Bot, roles: ADMIN_UP },
   { label: 'Internal Chat', href: '/dashboard/internal-chat', icon: MessageCircle, roles: ALL_ROLES },
+  { label: 'Appointment', href: '/dashboard/appointments', icon: CalendarCheck, roles: ALL_ROLES },
+  { label: 'Aktivitas', href: '/dashboard/activity-logs', icon: History, roles: MANAGEMENT },
   { label: 'Tim', href: '/dashboard/team', icon: UsersRound, roles: MANAGEMENT },
   { label: 'Pengaturan', href: '/dashboard/settings', icon: Settings, roles: ADMIN_UP },
   { label: 'Billing', href: '/dashboard/billing', icon: CreditCard, roles: ['OWNER'] as const },
@@ -170,10 +172,11 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
               );
 
               const linkContent = locked ? (
-                <div
+                <Link
                   key={item.href}
+                  href="/dashboard/billing"
                   className={cn(
-                    'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors cursor-not-allowed opacity-50',
+                    'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors opacity-60 hover:opacity-80',
                     'text-muted-foreground',
                     collapsed && 'justify-center px-2'
                   )}
@@ -183,10 +186,10 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
                   {!collapsed && (
                     <>
                       <span className="flex-1">{item.label}</span>
-                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-5">PRO</Badge>
+                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-5 text-amber-600 border-amber-300">PRO</Badge>
                     </>
                   )}
-                </div>
+                </Link>
               ) : (
                 <Link
                   key={item.href}

@@ -87,7 +87,7 @@ export class MediaController {
         }
       }
 
-      // SSRF protection: only allow URLs from WA API origin
+      // SSRF protection: only allow URLs from WA API origin OR external HTTPS
       let allowedOrigin: string;
       try {
         allowedOrigin = new URL(org.wa_api_base_url).origin;
@@ -96,7 +96,6 @@ export class MediaController {
         return;
       }
 
-      // Compare origins (resolve Docker URLs for both sides)
       let requestOrigin: string;
       try {
         requestOrigin = new URL(resolvedUrl).origin;
@@ -105,15 +104,23 @@ export class MediaController {
         return;
       }
 
-      if (requestOrigin !== allowedOrigin && resolveDockerUrl(requestOrigin) !== resolveDockerUrl(allowedOrigin)) {
-        res.status(403).json({ success: false, message: 'URL not allowed — must be from WA API' });
+      const isWaApiOrigin = requestOrigin === allowedOrigin
+        || resolveDockerUrl(requestOrigin) === resolveDockerUrl(allowedOrigin);
+
+      // External HTTP (non-HTTPS, non-WA-API) → block (SSRF risk with internal networks)
+      if (!isWaApiOrigin && !resolvedUrl.startsWith('https://')) {
+        res.status(403).json({ success: false, message: 'URL not allowed — must be from WA API or HTTPS' });
         return;
       }
 
-      // Fetch from WA API with auth header (resolve Docker URL for container networking)
-      const fetchUrl = resolveDockerUrl(resolvedUrl);
+      // WA API origin → fetch with X-API-Key; External HTTPS → fetch without auth
+      const fetchUrl = isWaApiOrigin ? resolveDockerUrl(resolvedUrl) : resolvedUrl;
+      const fetchHeaders: Record<string, string> = isWaApiOrigin
+        ? { 'X-API-Key': org.wa_api_key }
+        : {};
+
       const response = await axios.get(fetchUrl, {
-        headers: { 'X-API-Key': org.wa_api_key },
+        headers: fetchHeaders,
         responseType: 'stream',
         timeout: 30000,
       });
@@ -190,7 +197,7 @@ export class MediaController {
         }
       }
 
-      // SSRF protection: only allow URLs from WA API origin
+      // SSRF protection: only allow URLs from WA API origin OR external HTTPS
       let allowedOrigin: string;
       try {
         allowedOrigin = new URL(org.wa_api_base_url).origin;
@@ -199,7 +206,6 @@ export class MediaController {
         return;
       }
 
-      // Compare origins (resolve Docker URLs for both sides)
       let requestOrigin: string;
       try {
         requestOrigin = new URL(resolvedUrl).origin;
@@ -208,15 +214,21 @@ export class MediaController {
         return;
       }
 
-      if (requestOrigin !== allowedOrigin && resolveDockerUrl(requestOrigin) !== resolveDockerUrl(allowedOrigin)) {
+      const isWaApiOrigin = requestOrigin === allowedOrigin
+        || resolveDockerUrl(requestOrigin) === resolveDockerUrl(allowedOrigin);
+
+      if (!isWaApiOrigin && !resolvedUrl.startsWith('https://')) {
         res.status(403).json({ success: false, message: 'URL not allowed' });
         return;
       }
 
-      // Fetch from WA API with auth header (resolve Docker URL for container networking)
-      const fetchUrl = resolveDockerUrl(resolvedUrl);
+      const fetchUrl = isWaApiOrigin ? resolveDockerUrl(resolvedUrl) : resolvedUrl;
+      const fetchHeaders: Record<string, string> = isWaApiOrigin
+        ? { 'X-API-Key': org.wa_api_key }
+        : {};
+
       const response = await axios.get(fetchUrl, {
-        headers: { 'X-API-Key': org.wa_api_key },
+        headers: fetchHeaders,
         responseType: 'stream',
         timeout: 30000,
       });

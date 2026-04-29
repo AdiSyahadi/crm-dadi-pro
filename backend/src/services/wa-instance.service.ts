@@ -5,10 +5,41 @@ import { CreateInstanceInput, UpdateInstanceInput } from '../validators/wa-insta
 
 export class WAInstanceService {
   async list(organizationId: string) {
-    return prisma.wAInstance.findMany({
+    const instances = await prisma.wAInstance.findMany({
       where: { organization_id: organizationId },
       orderBy: { created_at: 'desc' },
     });
+
+    // Enrich with live status from WA API (fire-and-forget style — don't block if API is down)
+    try {
+      const waClient = await WAApiClient.forOrganization(organizationId);
+      const remoteResult = await waClient.getInstances();
+      const remoteList: any[] = remoteResult?.data || remoteResult || [];
+
+      for (const inst of instances) {
+        const remote = remoteList.find((r: any) => r.id === inst.wa_instance_id || r.instance_id === inst.wa_instance_id);
+        if (!remote) continue;
+
+        const liveStatus = remote.status?.toLowerCase() === 'connected' ? 'CONNECTED' : 'DISCONNECTED';
+        if (liveStatus !== inst.status) {
+          await prisma.wAInstance.update({
+            where: { id: inst.id },
+            data: {
+              status: liveStatus as any,
+              last_synced_at: new Date(),
+              ...(remote.phone_number ? { phone_number: remote.phone_number } : {}),
+              ...(liveStatus === 'CONNECTED' && !inst.connected_at ? { connected_at: new Date() } : {}),
+            },
+          });
+          (inst as any).status = liveStatus;
+        }
+        (inst as any).last_synced_at = new Date();
+      }
+    } catch {
+      // WA API unreachable — return DB status as-is
+    }
+
+    return instances;
   }
 
   async getById(organizationId: string, instanceId: string) {
@@ -180,6 +211,47 @@ export class WAInstanceService {
     const waClient = await WAApiClient.forOrganization(organizationId);
     const result = await waClient.getInstances();
     return result?.data || result || [];
+  }
+
+  async reconnect(organizationId: string, instanceId: string) {
+    const instance = await this.getById(organizationId, instanceId);
+
+    const waClient = await WAApiClient.forOrganization(organizationId);
+
+    // Update local status to CONNECTING while reconnect is in progress
+    await prisma.wAInstance.update({
+      where: { id: instance.id },
+      data: { status: 'CONNECTING' as any, last_synced_at: new Date() },
+    });
+
+    try {
+      const result = await waClient.reconnectInstance(instance.wa_instance_id);
+
+      // Check if reconnected successfully
+      const remoteStatus = await waClient.getInstanceStatus(instance.wa_instance_id);
+      const newStatus = remoteStatus?.status === 'connected' ? 'CONNECTED' : 'CONNECTING';
+
+      await prisma.wAInstance.update({
+        where: { id: instance.id },
+        data: {
+          status: newStatus as any,
+          last_synced_at: new Date(),
+          ...(remoteStatus?.phone_number ? { phone_number: remoteStatus.phone_number } : {}),
+          ...(newStatus === 'CONNECTED' ? { connected_at: new Date() } : {}),
+        },
+      });
+
+      return { status: newStatus, message: newStatus === 'CONNECTED' ? 'Berhasil tersambung kembali!' : 'Proses reconnect dimulai, tunggu beberapa detik...', remote: result };
+    } catch (error: any) {
+      // Revert to DISCONNECTED on failure
+      await prisma.wAInstance.update({
+        where: { id: instance.id },
+        data: { status: 'DISCONNECTED' as any, last_synced_at: new Date() },
+      });
+
+      const msg = error.response?.data?.error?.message || error.response?.data?.message || error.message || 'Gagal reconnect';
+      throw AppError.badRequest(`Reconnect gagal: ${msg}`);
+    }
   }
 }
 

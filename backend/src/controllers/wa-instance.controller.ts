@@ -87,6 +87,15 @@ export class WAInstanceController {
       next(error);
     }
   }
+
+  async reconnect(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const result = await waInstanceService.reconnect(req.user!.organizationId, req.params.id as string);
+      sendSuccess(res, result, result.message);
+    } catch (error) {
+      next(error);
+    }
+  }
 }
 
 export const waInstanceController = new WAInstanceController();

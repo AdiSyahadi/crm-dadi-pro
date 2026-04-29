@@ -342,6 +342,31 @@ export class ConversationService {
     return rows.map((r) => ({ label: r.name, color: r.color }));
   }
 
+  async addLabel(organizationId: string, conversationId: string, label: string, color?: string) {
+    await this.getById(organizationId, conversationId);
+
+    return prisma.conversationLabel.upsert({
+      where: { conversation_id_label: { conversation_id: conversationId, label } },
+      update: { color },
+      create: { conversation_id: conversationId, label, color },
+    });
+  }
+
+  async removeLabel(organizationId: string, conversationId: string, label: string) {
+    await this.getById(organizationId, conversationId);
+
+    return prisma.conversationLabel.deleteMany({
+      where: { conversation_id: conversationId, label },
+    });
+  }
+
+  async getConversationLabels(conversationId: string) {
+    return prisma.conversationLabel.findMany({
+      where: { conversation_id: conversationId },
+      orderBy: { label: 'asc' },
+    });
+  }
+
   async markAsRead(organizationId: string, conversationId: string) {
     await this.getById(organizationId, conversationId);
 

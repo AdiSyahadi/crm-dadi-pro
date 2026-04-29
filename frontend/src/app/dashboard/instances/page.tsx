@@ -16,10 +16,11 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
-import { Plus, Wifi, WifiOff, QrCode, Loader2, Trash2, RefreshCw, Smartphone, AlertTriangle, Settings, Cloud, Download } from 'lucide-react';
+import { Plus, Wifi, WifiOff, QrCode, Loader2, Trash2, RefreshCw, Smartphone, AlertTriangle, Settings, Cloud, Download, PlugZap } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import Link from 'next/link';
+import { getSocket } from '@/lib/socket';
 
 export default function InstancesPage() {
   const queryClient = useQueryClient();
@@ -42,6 +43,7 @@ export default function InstancesPage() {
       const { data } = await api.get('/instances');
       return data.data;
     },
+    refetchInterval: 30000, // Auto-refresh every 30s to keep status up-to-date
   });
 
   const { data: waApiSettings } = useQuery({
@@ -103,6 +105,34 @@ export default function InstancesPage() {
       toast.success('Instansi dihapus');
     },
   });
+
+  const reconnectMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const { data } = await api.post(`/instances/${id}/reconnect`);
+      return data;
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['instances'] });
+      toast.success(data.message || 'Proses reconnect dimulai');
+    },
+    onError: (err: any) => {
+      queryClient.invalidateQueries({ queryKey: ['instances'] });
+      toast.error(err.response?.data?.error?.message || 'Gagal reconnect');
+    },
+  });
+
+  // Realtime status updates via Socket.IO
+  useEffect(() => {
+    const socket = getSocket();
+    if (!socket) return;
+
+    const handler = () => {
+      queryClient.invalidateQueries({ queryKey: ['instances'] });
+    };
+
+    socket.on('instance:status', handler);
+    return () => { socket.off('instance:status', handler); };
+  }, [queryClient]);
 
   const syncMutation = useMutation({
     mutationFn: async (id: string) => {
@@ -320,12 +350,12 @@ export default function InstancesPage() {
                 <p className="text-xs text-muted-foreground text-center max-w-xs">
                   Konfigurasi WA API URL dan API Key terlebih dahulu di halaman Settings.
                 </p>
-                <Link href="/dashboard/settings">
-                  <Button variant="outline" size="sm" className="mt-2">
+                <Button variant="outline" size="sm" className="mt-2" asChild>
+                  <Link href="/dashboard/settings">
                     <Settings className="h-3.5 w-3.5 mr-1" />
                     Buka Settings
-                  </Button>
-                </Link>
+                  </Link>
+                </Button>
               </div>
             ) : qrDialog.errorMsg && qrDialog.errorMsg.includes('tidak ditemukan') ? (
               <div className="flex flex-col items-center gap-2 py-6">
@@ -405,24 +435,70 @@ export default function InstancesPage() {
                   <div className="text-xs text-muted-foreground mt-2 truncate" title={inst.wa_instance_id}>
                     ID: {inst.wa_instance_id}
                   </div>
+                  {inst.last_synced_at && (
+                    <div className="text-[10px] text-muted-foreground mt-1">
+                      Terakhir cek: {(() => {
+                        const diff = Math.floor((Date.now() - new Date(inst.last_synced_at).getTime()) / 1000);
+                        if (diff < 60) return 'baru saja';
+                        if (diff < 3600) return `${Math.floor(diff / 60)} menit lalu`;
+                        if (diff < 86400) return `${Math.floor(diff / 3600)} jam lalu`;
+                        return `${Math.floor(diff / 86400)} hari lalu`;
+                      })()}
+                    </div>
+                  )}
 
                   <div className="flex flex-col gap-2 mt-3">
                     <div className="flex items-center gap-2">
+                      {inst.status === 'DISCONNECTED' ? (
+                        <Button
+                          variant="default"
+                          size="sm"
+                          className="flex-1 h-8 text-xs"
+                          onClick={() => reconnectMutation.mutate(inst.id)}
+                          disabled={reconnectMutation.isPending}
+                        >
+                          {reconnectMutation.isPending ? (
+                            <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                          ) : (
+                            <PlugZap className="h-3.5 w-3.5 mr-1" />
+                          )}
+                          Reconnect
+                        </Button>
+                      ) : inst.status === 'CONNECTING' ? (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="flex-1 h-8 text-xs"
+                          disabled
+                        >
+                          <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                          Menghubungkan...
+                        </Button>
+                      ) : (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="flex-1 h-8 text-xs"
+                          onClick={() => getQrMutation.mutate(inst.id)}
+                          disabled={getQrMutation.isPending}
+                        >
+                          {getQrMutation.isPending ? (
+                            <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                          ) : (
+                            <RefreshCw className="h-3.5 w-3.5 mr-1" />
+                          )}
+                          Sync Status
+                        </Button>
+                      )}
                       <Button
                         variant="outline"
                         size="sm"
-                        className="flex-1 h-8 text-xs"
+                        className="h-8 text-xs"
                         onClick={() => getQrMutation.mutate(inst.id)}
                         disabled={getQrMutation.isPending}
+                        title="Cek Status / QR"
                       >
-                        {getQrMutation.isPending ? (
-                          <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
-                        ) : inst.status === 'CONNECTED' ? (
-                          <RefreshCw className="h-3.5 w-3.5 mr-1" />
-                        ) : (
-                          <QrCode className="h-3.5 w-3.5 mr-1" />
-                        )}
-                        {inst.status === 'CONNECTED' ? 'Sync Status' : 'Cek Status / QR'}
+                        <QrCode className="h-3.5 w-3.5" />
                       </Button>
                       <Button
                         variant="ghost"

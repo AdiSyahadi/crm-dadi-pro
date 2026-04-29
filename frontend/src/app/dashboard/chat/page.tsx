@@ -146,6 +146,8 @@ export default function ChatPage() {
   const [bulkSelected, setBulkSelected] = useState<Set<string>>(new Set());
   const [saveFilterName, setSaveFilterName] = useState('');
   const [saveFilterOpen, setSaveFilterOpen] = useState(false);
+  const [labelDialogOpen, setLabelDialogOpen] = useState(false);
+  const [newLabel, setNewLabel] = useState('');
 
   // Detect text selection in textarea
   const handleTextSelect = useCallback(() => {
@@ -367,6 +369,32 @@ export default function ChatPage() {
       toast.success('Percakapan dibuka kembali');
     },
     onError: (err: any) => toast.error(err?.response?.data?.error?.message || 'Gagal membuka percakapan'),
+  });
+
+  // Label mutations
+  const addLabelMutation = useMutation({
+    mutationFn: async ({ convId, label }: { convId: string; label: string }) => {
+      await api.post(`/conversations/${convId}/labels`, { label });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['conversations'] });
+      queryClient.invalidateQueries({ queryKey: ['conversation-labels'] });
+      setNewLabel('');
+      toast.success('Label ditambahkan');
+    },
+    onError: (err: any) => toast.error(err?.response?.data?.error?.message || 'Gagal menambahkan label'),
+  });
+
+  const removeLabelMutation = useMutation({
+    mutationFn: async ({ convId, label }: { convId: string; label: string }) => {
+      await api.delete(`/conversations/${convId}/labels`, { data: { label } });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['conversations'] });
+      queryClient.invalidateQueries({ queryKey: ['conversation-labels'] });
+      toast.success('Label dihapus');
+    },
+    onError: (err: any) => toast.error(err?.response?.data?.error?.message || 'Gagal menghapus label'),
   });
 
   // Bulk action mutations
@@ -834,7 +862,7 @@ export default function ChatPage() {
     name?.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2) || '?';
 
   return (
-    <div className="flex h-[calc(100vh-7rem)] rounded-xl border bg-card overflow-hidden">
+    <div className="flex h-[calc(100dvh-7rem)] sm:h-[calc(100vh-7rem)] rounded-xl border bg-card overflow-hidden">
       {/* Conversation List */}
       <div className={cn(
         'w-full md:w-[340px] lg:w-[380px] flex flex-col border-r',
@@ -1078,11 +1106,11 @@ export default function ChatPage() {
         ) : (
           <>
             {/* Chat Header */}
-            <div className="flex items-center gap-3 px-4 py-3 border-b">
+            <div className="flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2 sm:py-3 border-b">
               <Button
                 variant="ghost"
                 size="icon"
-                className="md:hidden h-8 w-8"
+                className="md:hidden h-9 w-9"
                 onClick={() => setMobileShowChat(false)}
               >
                 <ArrowLeft className="h-4 w-4" />
@@ -1094,17 +1122,17 @@ export default function ChatPage() {
               </Avatar>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-semibold truncate">{selectedConv ? getDisplayName(selectedConv) : ''}</p>
-                <p className="text-xs text-muted-foreground">{selectedConv ? getDisplayPhone(selectedConv) : ''}</p>
+                <p className="text-xs text-muted-foreground truncate">{selectedConv ? getDisplayPhone(selectedConv) : ''}</p>
               </div>
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1 flex-wrap justify-end">
                 {viewers.length > 0 && (
-                  <Badge variant="outline" className="text-[10px] gap-1 border-amber-400 text-amber-600 bg-amber-50">
+                  <Badge variant="outline" className="text-[10px] gap-1 border-amber-400 text-amber-600 bg-amber-50 hidden sm:inline-flex">
                     <Eye className="h-3 w-3" />
                     {viewers.map((v) => v.userName.split(' ')[0]).join(', ')} sedang melihat
                   </Badge>
                 )}
                 {selectedConv?.assigned_to_user && (
-                  <Badge variant="outline" className="text-[10px] gap-1">
+                  <Badge variant="outline" className="text-[10px] gap-1 hidden sm:inline-flex">
                     <User className="h-3 w-3" />
                     {selectedConv.assigned_to_user.name}
                   </Badge>
@@ -1125,6 +1153,10 @@ export default function ChatPage() {
                         Tugaskan ke CS
                       </DropdownMenuItem>
                     )}
+                    <DropdownMenuItem onClick={() => setLabelDialogOpen(true)}>
+                      <Tag className="h-4 w-4 mr-2" />
+                      Kelola Label
+                    </DropdownMenuItem>
                     {selectedConv?.status === 'OPEN' ? (
                       <DropdownMenuItem onClick={() => selectedConv && resolveMutation.mutate(selectedConv.id)}>
                         <CheckCircle className="h-4 w-4 mr-2" />
@@ -1201,7 +1233,7 @@ export default function ChatPage() {
 
                     <div
                       className={cn(
-                        'max-w-[75%] rounded-2xl px-4 py-2.5 text-sm',
+                        'max-w-[85%] sm:max-w-[75%] rounded-2xl px-3 sm:px-4 py-2 sm:py-2.5 text-sm',
                         isDeleted
                           ? 'bg-muted/50 border border-dashed border-muted-foreground/30'
                           : isInternalNote
@@ -1224,7 +1256,28 @@ export default function ChatPage() {
                       ) : (
                         <>
                       {msg.media_url && ['IMAGE', 'VIEW_ONCE'].includes(msg.message_type) && (
-                        <img src={getMediaUrl(msg.media_url)} alt="" className="rounded-lg mb-1 max-h-60 object-cover" />
+                        <img
+                          src={getMediaUrl(msg.media_url)}
+                          alt="Media lampiran"
+                          className="rounded-lg mb-1 max-h-60 object-cover cursor-pointer"
+                          onError={(e) => {
+                            const img = e.currentTarget;
+                            // If proxy failed, try direct URL as fallback
+                            if (img.src !== msg.media_url && msg.media_url!.startsWith('http')) {
+                              img.src = msg.media_url!;
+                            } else {
+                              // Replace broken image with clickable link
+                              const link = document.createElement('a');
+                              link.href = msg.media_url!;
+                              link.target = '_blank';
+                              link.rel = 'noopener noreferrer';
+                              link.className = 'text-xs underline opacity-75 block mb-1';
+                              link.textContent = '🖼️ Buka gambar (gagal dimuat)';
+                              img.replaceWith(link);
+                            }
+                          }}
+                          onClick={() => window.open(getMediaUrl(msg.media_url), '_blank')}
+                        />
                       )}
                       {msg.media_url && msg.message_type === 'VIDEO' && (
                         <video src={getMediaUrl(msg.media_url)} controls className="rounded-lg mb-1 max-h-60" />
@@ -1236,7 +1289,19 @@ export default function ChatPage() {
                         <a href={getMediaUrl(msg.media_url)} target="_blank" rel="noopener noreferrer" className="underline text-xs block mb-1">📎 Buka Dokumen</a>
                       )}
                       {msg.media_url && msg.message_type === 'STICKER' && (
-                        <img src={getMediaUrl(msg.media_url)} alt="Sticker" className="max-h-32 mb-1" />
+                        <img
+                          src={getMediaUrl(msg.media_url)}
+                          alt="Sticker"
+                          className="max-h-32 mb-1"
+                          onError={(e) => {
+                            const img = e.currentTarget;
+                            if (img.src !== msg.media_url && msg.media_url!.startsWith('http')) {
+                              img.src = msg.media_url!;
+                            } else {
+                              img.style.display = 'none';
+                            }
+                          }}
+                        />
                       )}
                       {/* Hide placeholder text for media types when media_url is present */}
                       {!(msg.media_url && ['STICKER', 'IMAGE', 'VIDEO', 'AUDIO', 'VIEW_ONCE'].includes(msg.message_type) && (!msg.content || msg.content.startsWith('['))) && (
@@ -1363,12 +1428,12 @@ export default function ChatPage() {
             </ScrollArea>
 
             {/* Message Input */}
-            <div className="border-t p-3">
+            <div className="border-t p-2 sm:p-3">
               {/* Attachment Preview */}
               {attachedFile && (
                 <div className="flex items-center gap-3 px-3 py-2 mb-2 bg-muted/50 rounded-lg max-w-3xl mx-auto">
                   {attachedPreview && attachedFile.type.startsWith('image/') ? (
-                    <img src={attachedPreview} alt="" className="h-12 w-12 rounded object-cover" />
+                    <img src={attachedPreview} alt="Preview lampiran" className="h-12 w-12 rounded object-cover" />
                   ) : attachedFile.type.startsWith('video/') ? (
                     <div className="h-12 w-12 rounded bg-muted flex items-center justify-center"><Film className="h-5 w-5 text-muted-foreground" /></div>
                   ) : attachedFile.type.startsWith('audio/') ? (
@@ -1594,6 +1659,56 @@ export default function ChatPage() {
               );
             })}
           </div>
+        </DialogContent>
+      </Dialog>
+      {/* Label Dialog */}
+      <Dialog open={labelDialogOpen} onOpenChange={(o) => { setLabelDialogOpen(o); if (!o) setNewLabel(''); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Tag className="h-5 w-5" /> Kelola Label
+            </DialogTitle>
+          </DialogHeader>
+          {selectedConv?.labels && selectedConv.labels.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {selectedConv.labels.map((l) => (
+                <Badge key={l.id} variant="secondary" className="gap-1 pr-1" style={l.color ? { backgroundColor: l.color + '20', color: l.color, borderColor: l.color } : {}}>
+                  {l.label}
+                  <button type="button" className="ml-0.5 rounded-full hover:bg-black/10 p-0.5" onClick={() => selectedId && removeLabelMutation.mutate({ convId: selectedId, label: l.label })}>
+                    <X className="h-3 w-3" />
+                  </button>
+                </Badge>
+              ))}
+            </div>
+          )}
+          <div className="flex gap-2">
+            <Input
+              placeholder="Tambah label baru..."
+              value={newLabel}
+              onChange={(e) => setNewLabel(e.target.value)}
+              className="flex-1 h-9"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && newLabel.trim() && selectedId) {
+                  addLabelMutation.mutate({ convId: selectedId, label: newLabel.trim() });
+                }
+              }}
+            />
+            <Button size="sm" className="h-9" disabled={!newLabel.trim() || addLabelMutation.isPending} onClick={() => selectedId && newLabel.trim() && addLabelMutation.mutate({ convId: selectedId, label: newLabel.trim() })}>
+              Tambah
+            </Button>
+          </div>
+          {availableLabels.length > 0 && (
+            <div className="space-y-1">
+              <p className="text-xs text-muted-foreground">Label tersedia:</p>
+              <div className="flex flex-wrap gap-1.5">
+                {availableLabels.filter((l) => !selectedConv?.labels?.some((cl) => cl.label === l.label)).map((l) => (
+                  <Badge key={l.label} variant="outline" className="cursor-pointer hover:bg-primary/10 transition-colors" style={l.color ? { borderColor: l.color, color: l.color } : {}} onClick={() => selectedId && addLabelMutation.mutate({ convId: selectedId, label: l.label })}>
+                    + {l.label}
+                  </Badge>
+                ))}
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

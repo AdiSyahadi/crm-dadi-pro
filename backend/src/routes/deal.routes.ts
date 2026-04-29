@@ -20,6 +20,8 @@ router.post('/:id/won', requireFeature('deals'), dealController.markWon);
 router.post('/:id/lost', requireFeature('deals'), dealController.markLost);
 router.post('/:id/reopen', requireFeature('deals'), dealController.reopen);
 router.post('/:id/notes', requireFeature('deals'), dealController.addNote);
+router.post('/:id/payment-link', requireFeature('deals'), dealController.createPaymentLink);
+router.get('/:id/payment-status', requireFeature('deals'), dealController.checkPaymentStatus);
 router.delete('/:id', authorize('OWNER', 'ADMIN'), dealController.delete);
 
 export default router;

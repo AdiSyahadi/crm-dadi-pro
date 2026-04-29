@@ -8,11 +8,13 @@ import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Timer, Loader2, Settings, BarChart3, ShieldCheck, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { Timer, Loader2, Settings, BarChart3, ShieldCheck, AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight } from 'lucide-react';
 import { toast } from 'sonner';
+import { useState } from 'react';
 
 export default function SlaPage() {
   const queryClient = useQueryClient();
+  const [breachPage, setBreachPage] = useState(1);
 
   // ── Settings ──
   const { data: settings, isLoading: loadingSettings } = useQuery({
@@ -33,6 +35,12 @@ export default function SlaPage() {
   const { data: stats, isLoading: loadingStats } = useQuery({
     queryKey: ['sla-stats'],
     queryFn: async () => (await api.get('/sla/stats')).data.data,
+  });
+
+  // ── Breached list ──
+  const { data: breachedData } = useQuery({
+    queryKey: ['sla-breached', breachPage],
+    queryFn: async () => (await api.get(`/sla/breached?page=${breachPage}&limit=10`)).data.data,
   });
 
   if (loadingSettings || loadingStats) {
@@ -98,6 +106,60 @@ export default function SlaPage() {
               </CardContent>
             </Card>
           </div>
+
+          {/* Breached conversations table */}
+          {(breachedData?.rows?.length ?? 0) > 0 && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm flex items-center gap-1.5">
+                  <AlertTriangle className="h-4 w-4 text-red-500" /> Percakapan Melewati SLA
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b text-left text-muted-foreground">
+                        <th className="py-2 pr-4">Kontak</th>
+                        <th className="py-2 pr-4">Telepon</th>
+                        <th className="py-2 pr-4">Agent</th>
+                        <th className="py-2 pr-4">Status</th>
+                        <th className="py-2 pr-4">Deadline</th>
+                        <th className="py-2">Terlewat</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {breachedData.rows.map((c: any) => (
+                        <tr key={c.id} className="border-b last:border-0 hover:bg-muted/30">
+                          <td className="py-2 pr-4 font-medium">{c.contact?.name || '-'}</td>
+                          <td className="py-2 pr-4 text-muted-foreground">{c.contact?.phone_number || '-'}</td>
+                          <td className="py-2 pr-4">{c.assigned_to_user?.name || <span className="text-muted-foreground">Belum ada</span>}</td>
+                          <td className="py-2 pr-4">
+                            <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${c.status === 'OPEN' ? 'bg-yellow-100 text-yellow-700' : c.status === 'RESOLVED' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'}`}>
+                              {c.status}
+                            </span>
+                          </td>
+                          <td className="py-2 pr-4 text-muted-foreground">{c.sla_deadline_at ? new Date(c.sla_deadline_at).toLocaleString('id-ID') : '-'}</td>
+                          <td className="py-2 text-red-600 font-medium">{c.sla_breached_at ? new Date(c.sla_breached_at).toLocaleString('id-ID') : '-'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {breachedData.total > 10 && (
+                  <div className="flex items-center justify-end gap-2 mt-3">
+                    <Button variant="outline" size="sm" disabled={breachPage <= 1} onClick={() => setBreachPage(breachPage - 1)}>
+                      <ChevronLeft className="h-4 w-4" />
+                    </Button>
+                    <span className="text-xs text-muted-foreground">Hal {breachPage} / {Math.ceil(breachedData.total / 10)}</span>
+                    <Button variant="outline" size="sm" disabled={breachPage >= Math.ceil(breachedData.total / 10)} onClick={() => setBreachPage(breachPage + 1)}>
+                      <ChevronRight className="h-4 w-4" />
+                    </Button>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
         </TabsContent>
 
         {/* ── Settings Tab ── */}

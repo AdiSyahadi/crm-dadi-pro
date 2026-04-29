@@ -43,9 +43,13 @@ import {
   Edit,
   ChevronLeft,
   ChevronRight,
+  ArrowUp,
+  ArrowDown,
+  ArrowUpDown,
+  Download,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { cn } from '@/lib/utils';
+import { cn, downloadCsv } from '@/lib/utils';
 import { TaskDialog } from '@/components/task-dialog';
 
 const STATUS_MAP: Record<string, { label: string; color: string }> = {
@@ -96,6 +100,8 @@ export default function TasksPage() {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [typeFilter, setTypeFilter] = useState<string>('all');
   const [priorityFilter, setPriorityFilter] = useState<string>('all');
+  const [sortBy, setSortBy] = useState('created_at');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editTask, setEditTask] = useState<Task | null>(null);
@@ -107,9 +113,26 @@ export default function TasksPage() {
   if (statusFilter !== 'all') queryParams.set('status', statusFilter);
   if (typeFilter !== 'all') queryParams.set('type', typeFilter);
   if (priorityFilter !== 'all') queryParams.set('priority', priorityFilter);
+  queryParams.set('sort_by', sortBy);
+  queryParams.set('sort_order', sortOrder);
+
+  const toggleSort = (field: string) => {
+    if (sortBy === field) {
+      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortBy(field);
+      setSortOrder('asc');
+    }
+    setPage(1);
+  };
+
+  const SortIcon = ({ field }: { field: string }) => {
+    if (sortBy !== field) return <ArrowUpDown className="h-3 w-3 ml-1 opacity-40" />;
+    return sortOrder === 'asc' ? <ArrowUp className="h-3 w-3 ml-1" /> : <ArrowDown className="h-3 w-3 ml-1" />;
+  };
 
   const { data, isLoading } = useQuery({
-    queryKey: ['tasks', page, search, statusFilter, typeFilter, priorityFilter],
+    queryKey: ['tasks', page, search, statusFilter, typeFilter, priorityFilter, sortBy, sortOrder],
     queryFn: async () => {
       const { data } = await api.get(`/tasks?${queryParams.toString()}`);
       return data as { data: Task[]; meta: { page: number; limit: number; total: number; totalPages: number } };
@@ -178,10 +201,15 @@ export default function TasksPage() {
             <h1 className="text-2xl font-bold">Tugas</h1>
             <p className="text-sm text-muted-foreground">Kelola tugas dan pengingat tim</p>
           </div>
-          <Button onClick={() => { setEditTask(null); setDialogOpen(true); }}>
-            <Plus className="h-4 w-4 mr-2" />
-            Buat Tugas
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={() => { downloadCsv('/export/tasks', 'tugas.csv').then(() => toast.success('Export berhasil')).catch(() => toast.error('Gagal export')); }}>
+              <Download className="h-4 w-4 mr-2" /> Export CSV
+            </Button>
+            <Button onClick={() => { setEditTask(null); setDialogOpen(true); }}>
+              <Plus className="h-4 w-4 mr-2" />
+              Buat Tugas
+            </Button>
+          </div>
         </div>
 
         {/* Summary Cards */}
@@ -296,13 +324,17 @@ export default function TasksPage() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Tugas</TableHead>
-                    <TableHead>Tipe</TableHead>
-                    <TableHead>Prioritas</TableHead>
+                    <TableHead className="hidden sm:table-cell">Tipe</TableHead>
+                    <TableHead className="hidden md:table-cell cursor-pointer select-none" onClick={() => toggleSort('priority')}>
+                      <span className="flex items-center">Prioritas<SortIcon field="priority" /></span>
+                    </TableHead>
                     <TableHead>Status</TableHead>
-                    <TableHead>Tenggat</TableHead>
-                    <TableHead>Ditugaskan</TableHead>
-                    <TableHead>Kontak / Deal</TableHead>
-                    <TableHead className="w-[50px]" />
+                    <TableHead className="cursor-pointer select-none" onClick={() => toggleSort('due_date')}>
+                      <span className="flex items-center">Tenggat<SortIcon field="due_date" /></span>
+                    </TableHead>
+                    <TableHead className="hidden lg:table-cell">Ditugaskan</TableHead>
+                    <TableHead className="hidden lg:table-cell">Kontak / Deal</TableHead>
+                    <TableHead className="w-[50px]"><span className="sr-only">Aksi</span></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -314,12 +346,12 @@ export default function TasksPage() {
                           <p className="text-xs text-muted-foreground truncate max-w-[200px]">{task.description}</p>
                         )}
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="hidden sm:table-cell">
                         <Badge variant="outline" className="text-[10px]">
                           {TYPE_MAP[task.type] || task.type}
                         </Badge>
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="hidden md:table-cell">
                         <span className={cn('text-xs font-medium', PRIORITY_MAP[task.priority]?.color)}>
                           {PRIORITY_MAP[task.priority]?.label || task.priority}
                         </span>
@@ -352,10 +384,10 @@ export default function TasksPage() {
                           {formatDate(task.due_date)}
                         </span>
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="hidden lg:table-cell">
                         <span className="text-xs">{task.assigned_to?.name || '-'}</span>
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="hidden lg:table-cell">
                         <div className="text-xs">
                           {task.contact && <span>{task.contact.name}</span>}
                           {task.deal && <span className="text-muted-foreground">{task.contact ? ' • ' : ''}{task.deal.title}</span>}

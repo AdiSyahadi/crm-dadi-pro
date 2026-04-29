@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { dealService } from '../services/deal.service';
 import { forecastingService } from '../services/forecasting.service';
+import { midtransService } from '../services/midtrans.service';
 import {
   createDealSchema,
   updateDealSchema,
@@ -138,6 +139,44 @@ export class DealController {
     try {
       const data = await forecastingService.getForecast(req.user!.organizationId);
       sendSuccess(res, data);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async createPaymentLink(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const result = await midtransService.createSnapTransaction({
+        deal_id: req.params.id as string,
+        organization_id: req.user!.organizationId,
+      });
+      sendSuccess(res, result, 'Link pembayaran berhasil dibuat');
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async checkPaymentStatus(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const deal = await dealService.getById(req.user!.organizationId, req.params.id as string);
+      if (!deal.midtrans_order_id) {
+        sendSuccess(res, { payment_status: null, message: 'Belum ada transaksi Midtrans' });
+        return;
+      }
+
+      const status = await midtransService.checkTransactionStatus(deal.midtrans_order_id);
+      if (status) {
+        // Also process the notification to keep deal in sync
+        await midtransService.handleNotification(status);
+      }
+
+      const refreshed = await dealService.getById(req.user!.organizationId, req.params.id as string);
+      sendSuccess(res, {
+        payment_status: refreshed.payment_status,
+        payment_type: refreshed.midtrans_payment_type,
+        order_id: refreshed.midtrans_order_id,
+        snap_url: refreshed.midtrans_snap_url,
+      });
     } catch (error) {
       next(error);
     }

@@ -29,6 +29,7 @@ interface BankAccount {
 }
 
 interface MidtransConfig {
+  merchant_id: string;
   server_key: string;
   server_key_set: boolean;
   client_key: string;
@@ -51,7 +52,7 @@ export default function AdminPaymentSettingsPage() {
   // ---- Midtrans ----
   const [midtransConfig, setMidtransConfig] = useState<MidtransConfig | null>(null);
   const [midtransLoading, setMidtransLoading] = useState(true);
-  const [midtransForm, setMidtransForm] = useState({ server_key: '', client_key: '', environment: 'sandbox', is_enabled: false });
+  const [midtransForm, setMidtransForm] = useState({ merchant_id: '', server_key: '', client_key: '', environment: 'sandbox', is_enabled: false });
   const [midtransSaving, setMidtransSaving] = useState(false);
   const [showServerKey, setShowServerKey] = useState(false);
 
@@ -72,6 +73,7 @@ export default function AdminPaymentSettingsPage() {
         const c = res.data.data;
         setMidtransConfig(c);
         setMidtransForm({
+          merchant_id: c.merchant_id || '',
           server_key: '', // don't prefill server key for security
           client_key: c.client_key || '',
           environment: c.environment || 'sandbox',
@@ -147,6 +149,7 @@ export default function AdminPaymentSettingsPage() {
     setMidtransSaving(true);
     try {
       const payload: any = {
+        merchant_id: midtransForm.merchant_id,
         client_key: midtransForm.client_key,
         environment: midtransForm.environment,
         is_enabled: midtransForm.is_enabled ? 'true' : 'false',
@@ -260,6 +263,19 @@ export default function AdminPaymentSettingsPage() {
                   checked={midtransForm.is_enabled}
                   onCheckedChange={(checked) => setMidtransForm({ ...midtransForm, is_enabled: checked })}
                 />
+              </div>
+
+              {/* Merchant ID */}
+              <div className="space-y-2">
+                <Label>Merchant ID</Label>
+                <Input
+                  value={midtransForm.merchant_id}
+                  onChange={(e) => setMidtransForm({ ...midtransForm, merchant_id: e.target.value })}
+                  placeholder="Masukkan Merchant ID..."
+                />
+                {midtransConfig?.merchant_id && (
+                  <p className="text-xs text-muted-foreground">Merchant ID saat ini: {midtransConfig.merchant_id}</p>
+                )}
               </div>
 
               {/* Environment */}

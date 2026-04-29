@@ -181,11 +181,11 @@ export default function PricingPage() {
   return (
     <div className="space-y-6 max-w-6xl">
       <div className="flex items-center gap-3">
-        <Link href="/dashboard/billing">
-          <Button variant="ghost" size="icon" className="h-8 w-8">
+        <Button variant="ghost" size="icon" className="h-8 w-8" asChild>
+          <Link href="/dashboard/billing">
             <ArrowLeft className="h-4 w-4" />
-          </Button>
-        </Link>
+          </Link>
+        </Button>
         <div>
           <h1 className="text-2xl font-bold">Pilih Paket</h1>
           <p className="text-sm text-muted-foreground">Bandingkan fitur dan pilih paket yang sesuai kebutuhan Anda</p>

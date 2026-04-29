@@ -203,6 +203,32 @@ class SlaService {
       compliance_rate: total > 0 ? Math.round((withinSla / total) * 100) : 100,
     };
   }
+
+  async listBreached(organizationId: string, page = 1, limit = 20) {
+    const where = {
+      organization_id: organizationId,
+      sla_breached_at: { not: null } as { not: null },
+    };
+    const [rows, total] = await Promise.all([
+      prisma.conversation.findMany({
+        where,
+        orderBy: { sla_breached_at: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+        select: {
+          id: true,
+          status: true,
+          sla_deadline_at: true,
+          sla_breached_at: true,
+          created_at: true,
+          contact: { select: { id: true, name: true, phone_number: true } },
+          assigned_to_user: { select: { id: true, name: true } },
+        },
+      }),
+      prisma.conversation.count({ where }),
+    ]);
+    return { rows, total, page, limit };
+  }
 }
 
 export const slaService = new SlaService();

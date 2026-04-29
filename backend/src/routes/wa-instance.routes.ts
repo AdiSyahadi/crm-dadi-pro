@@ -17,5 +17,6 @@ router.delete('/:id', authorize('OWNER', 'ADMIN'), waInstanceController.delete);
 router.get('/:id/status', waInstanceController.getStatus);
 router.get('/:id/qr', waInstanceController.getQR);
 router.post('/:id/sync', authorize('OWNER', 'ADMIN'), waInstanceController.syncMessages);
+router.post('/:id/reconnect', authorize('OWNER', 'ADMIN'), waInstanceController.reconnect);
 
 export default router;

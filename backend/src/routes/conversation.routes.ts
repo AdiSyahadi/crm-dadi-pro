@@ -26,6 +26,9 @@ router.post('/:id/assign', authorize('OWNER', 'ADMIN', 'SUPERVISOR'), requireFea
 router.post('/:id/resolve', conversationController.resolve);
 router.post('/:id/reopen', conversationController.reopen);
 router.post('/:id/read', conversationController.markAsRead);
+router.get('/:id/labels', conversationController.getConversationLabels);
+router.post('/:id/labels', conversationController.addLabel);
+router.delete('/:id/labels', conversationController.removeLabel);
 router.delete('/:id/messages/:messageId', conversationController.deleteMessage);
 router.put('/:id/messages/:messageId', requireFeature('editMessage'), conversationController.editMessage);
 

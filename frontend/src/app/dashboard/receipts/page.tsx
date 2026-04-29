@@ -49,7 +49,8 @@ import {
 import { toast } from 'sonner';
 import { useConfirmStore } from '@/stores/confirm.store';
 import { ReceiptDialog } from '@/components/receipt-dialog';
-import { Pencil } from 'lucide-react';
+import { Pencil, ArrowUp, ArrowDown, ArrowUpDown, Download } from 'lucide-react';
+import { downloadCsv } from '@/lib/utils';
 
 const RECEIPT_TYPES = [
   { key: 'invoice', label: 'Invoice' },
@@ -108,6 +109,8 @@ export default function ReceiptsPage() {
   const [typeFilter, setTypeFilter] = useState('all');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editData, setEditData] = useState<any>(null);
+  const [sortBy, setSortBy] = useState('created_at');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const limit = 20;
 
   const openCreate = () => {
@@ -133,13 +136,30 @@ export default function ReceiptsPage() {
     },
   });
 
+  const toggleSort = (field: string) => {
+    if (sortBy === field) {
+      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortBy(field);
+      setSortOrder('asc');
+    }
+    setPage(1);
+  };
+
+  const SortIcon = ({ field }: { field: string }) => {
+    if (sortBy !== field) return <ArrowUpDown className="h-3 w-3 ml-1 opacity-40" />;
+    return sortOrder === 'asc' ? <ArrowUp className="h-3 w-3 ml-1" /> : <ArrowDown className="h-3 w-3 ml-1" />;
+  };
+
   const { data: receiptData, isLoading } = useQuery<{ data: ReceiptItem[]; meta: { total: number; page: number; limit: number; totalPages: number } }>({
-    queryKey: ['receipts', page, search, statusFilter, typeFilter],
+    queryKey: ['receipts', page, search, statusFilter, typeFilter, sortBy, sortOrder],
     queryFn: async () => {
       const params = new URLSearchParams({ page: String(page), limit: String(limit) });
       if (search) params.set('search', search);
       if (statusFilter !== 'all') params.set('status', statusFilter);
       if (typeFilter !== 'all') params.set('type', typeFilter);
+      params.set('sort_by', sortBy);
+      params.set('sort_order', sortOrder);
       const { data } = await api.get(`/receipts?${params}`);
       return data;
     },
@@ -232,10 +252,15 @@ export default function ReceiptsPage() {
             <h1 className="text-2xl font-bold">Kwitansi</h1>
             <p className="text-sm text-muted-foreground">Kelola kwitansi, invoice, dan bukti pembayaran</p>
           </div>
-          <Button onClick={openCreate}>
-            <Plus className="h-4 w-4 mr-2" />
-            Buat Kwitansi
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={() => { downloadCsv('/export/receipts', 'kwitansi.csv').then(() => toast.success('Export berhasil')).catch(() => toast.error('Gagal export')); }}>
+              <Download className="h-4 w-4 mr-2" /> Export CSV
+            </Button>
+            <Button onClick={openCreate}>
+              <Plus className="h-4 w-4 mr-2" />
+              Buat Kwitansi
+            </Button>
+          </div>
         </div>
 
         {/* Summary Cards */}
@@ -313,14 +338,20 @@ export default function ReceiptsPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>No. Kwitansi</TableHead>
-                    <TableHead>Tipe</TableHead>
+                    <TableHead className="cursor-pointer select-none" onClick={() => toggleSort('receipt_number')}>
+                      <span className="flex items-center">No. Kwitansi<SortIcon field="receipt_number" /></span>
+                    </TableHead>
+                    <TableHead className="hidden sm:table-cell">Tipe</TableHead>
                     <TableHead>Penerima</TableHead>
-                    <TableHead>Deal</TableHead>
-                    <TableHead className="text-right">Nominal</TableHead>
+                    <TableHead className="hidden md:table-cell">Deal</TableHead>
+                    <TableHead className="text-right cursor-pointer select-none" onClick={() => toggleSort('total_amount')}>
+                      <span className="flex items-center justify-end">Nominal<SortIcon field="total_amount" /></span>
+                    </TableHead>
                     <TableHead>Status</TableHead>
-                    <TableHead>Tanggal</TableHead>
-                    <TableHead className="w-[60px]" />
+                    <TableHead className="hidden md:table-cell cursor-pointer select-none" onClick={() => toggleSort('created_at')}>
+                      <span className="flex items-center">Tanggal<SortIcon field="created_at" /></span>
+                    </TableHead>
+                    <TableHead className="w-[60px]"><span className="sr-only">Aksi</span></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -330,7 +361,7 @@ export default function ReceiptsPage() {
                     return (
                       <TableRow key={r.id}>
                         <TableCell className="font-mono text-sm">{r.receipt_number}</TableCell>
-                        <TableCell>
+                        <TableCell className="hidden sm:table-cell">
                           <Badge variant="outline">{typeDef?.label || r.type}</Badge>
                         </TableCell>
                         <TableCell>
@@ -341,7 +372,7 @@ export default function ReceiptsPage() {
                             )}
                           </div>
                         </TableCell>
-                        <TableCell>
+                        <TableCell className="hidden md:table-cell">
                           {r.deal ? (
                             <span className="text-xs text-muted-foreground">{r.deal.deal_number}</span>
                           ) : (
@@ -354,7 +385,7 @@ export default function ReceiptsPage() {
                         <TableCell>
                           <Badge variant={st.variant}>{st.label}</Badge>
                         </TableCell>
-                        <TableCell className="text-sm text-muted-foreground">
+                        <TableCell className="hidden md:table-cell text-sm text-muted-foreground">
                           {formatDate(r.created_at)}
                         </TableCell>
                         <TableCell>

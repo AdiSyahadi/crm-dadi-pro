@@ -62,10 +62,10 @@ export function Topbar({ onMenuClick, title }: TopbarProps) {
                   {initials}
                 </AvatarFallback>
               </Avatar>
-              <div className="hidden sm:block text-left">
-                <p className="text-sm font-medium leading-none">{user?.name}</p>
-                <p className="text-[11px] text-muted-foreground leading-tight mt-0.5">{user?.organization?.name}</p>
-              </div>
+              <span className="hidden sm:block text-left">
+                <span className="text-sm font-medium leading-none block">{user?.name}</span>
+                <span className="text-[11px] text-muted-foreground leading-tight mt-0.5 block">{user?.organization?.name}</span>
+              </span>
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-56">
