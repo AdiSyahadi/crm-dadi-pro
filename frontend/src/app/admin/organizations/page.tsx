@@ -101,7 +101,7 @@ export default function AdminOrgsPage() {
     if (!changePlanOrg || !newPlan) return;
     setSaving(true);
     try {
-      await api.patch(`/admin/organizations/${changePlanOrg.id}/plan`, { planCode: newPlan });
+      await api.patch(`/admin/organizations/${changePlanOrg.id}/plan`, { plan_code: newPlan });
       toast.success(`Plan ${changePlanOrg.name} diubah ke ${newPlan}`);
       setChangePlanOrg(null);
       setNewPlan('');
