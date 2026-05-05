@@ -1116,6 +1116,26 @@ export default function ChatPage() {
                       )}
                     </div>
                   </div>
+                  {conv.labels && conv.labels.length > 0 && (
+                    <div className="flex items-center gap-1 mt-1 flex-wrap">
+                      {conv.labels.slice(0, 3).map((lb) => (
+                        <span
+                          key={lb.id}
+                          className="inline-flex items-center rounded-full px-1.5 py-0 text-[9px] font-medium leading-4"
+                          style={{
+                            backgroundColor: lb.color ? `${lb.color}20` : 'hsl(var(--muted))',
+                            color: lb.color || 'hsl(var(--muted-foreground))',
+                            border: `1px solid ${lb.color ? `${lb.color}40` : 'hsl(var(--border))'}`,
+                          }}
+                        >
+                          {lb.label}
+                        </span>
+                      ))}
+                      {conv.labels.length > 3 && (
+                        <span className="text-[9px] text-muted-foreground">+{conv.labels.length - 3}</span>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             ))
@@ -1156,6 +1176,23 @@ export default function ChatPage() {
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-semibold truncate">{selectedConv ? getDisplayName(selectedConv) : ''}</p>
                 <p className="text-xs text-muted-foreground truncate">{selectedConv ? getDisplayPhone(selectedConv) : ''}</p>
+                {selectedConv?.labels && selectedConv.labels.length > 0 && (
+                  <div className="flex items-center gap-1 mt-0.5 flex-wrap">
+                    {selectedConv.labels.map((lb) => (
+                      <span
+                        key={lb.id}
+                        className="inline-flex items-center rounded-full px-1.5 py-0 text-[9px] font-medium leading-4"
+                        style={{
+                          backgroundColor: lb.color ? `${lb.color}20` : 'hsl(var(--muted))',
+                          color: lb.color || 'hsl(var(--muted-foreground))',
+                          border: `1px solid ${lb.color ? `${lb.color}40` : 'hsl(var(--border))'}`,
+                        }}
+                      >
+                        {lb.label}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
               <div className="flex items-center gap-1 flex-wrap justify-end">
                 {viewers.length > 0 && (
