@@ -87,6 +87,7 @@ interface Conversation {
   id: string;
   chat_jid: string;
   contact: { id: string; name: string; phone_number: string; avatar_url: string | null };
+  instance?: { id: string; name: string; wa_instance_id: string; phone_number: string | null };
   last_message_preview: string | null;
   last_message_at: string | null;
   unread_count: number;
@@ -120,6 +121,7 @@ export default function ChatPage() {
   const [chatFilter, setChatFilter] = useState<'all' | 'mine' | 'unassigned'>(isAgent ? 'mine' : 'all');
   const [agentFilter, setAgentFilter] = useState<string>('');  // userId or '' for all
   const [labelFilter, setLabelFilter] = useState<string>('');  // label string or '' for all
+  const [instanceFilter, setInstanceFilter] = useState<string>('');  // instance id or '' for all
   const [messageText, setMessageText] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [mobileShowChat, setMobileShowChat] = useState(false);
@@ -258,7 +260,7 @@ export default function ChatPage() {
 
   // Fetch conversations
   const { data: conversations = [], isLoading: loadingConversations, error: convError } = useQuery({
-    queryKey: ['conversations', searchQuery, chatFilter, agentFilter, labelFilter],
+    queryKey: ['conversations', searchQuery, chatFilter, agentFilter, labelFilter, instanceFilter],
     queryFn: async () => {
       const params = new URLSearchParams();
       if (searchQuery) params.set('search', searchQuery);
@@ -271,6 +273,7 @@ export default function ChatPage() {
         params.set('assigned_to', 'unassigned');
       }
       if (labelFilter) params.set('label', labelFilter);
+      if (instanceFilter) params.set('instance_id', instanceFilter);
       const { data } = await api.get(`/conversations?${params}`);
       return (data.data || []) as Conversation[];
     },
@@ -287,6 +290,16 @@ export default function ChatPage() {
       return (data.data || []) as { label: string; color: string | null }[];
     },
     staleTime: 30_000,
+  });
+
+  // Fetch WA instances for instance filter dropdown
+  const { data: waInstances = [] } = useQuery({
+    queryKey: ['instances'],
+    queryFn: async () => {
+      const { data } = await api.get('/instances');
+      return (data.data || []) as { id: string; name: string; phone_number: string | null }[];
+    },
+    staleTime: 60_000,
   });
 
   // Fetch quick replies for slash-command
@@ -435,7 +448,7 @@ export default function ChatPage() {
       await api.post('/saved-filters', {
         name,
         entity: 'conversation',
-        filters: { chatFilter, agentFilter, labelFilter },
+        filters: { chatFilter, agentFilter, labelFilter, instanceFilter },
       });
     },
     onSuccess: () => {
@@ -456,6 +469,7 @@ export default function ChatPage() {
     if (filters.chatFilter) setChatFilter(filters.chatFilter);
     if (filters.agentFilter !== undefined) setAgentFilter(filters.agentFilter);
     if (filters.labelFilter !== undefined) setLabelFilter(filters.labelFilter);
+    if (filters.instanceFilter !== undefined) setInstanceFilter(filters.instanceFilter);
   };
 
   // Send message mutation
@@ -963,6 +977,25 @@ export default function ChatPage() {
                   <SelectItem value="__all__">Semua Label</SelectItem>
                   {availableLabels.map((l) => (
                     <SelectItem key={l.label} value={l.label}>{l.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+          {/* Instance filter — show when multiple instances exist */}
+          {waInstances.length > 1 && (
+            <div className="mt-2">
+              <Select value={instanceFilter || '__all__'} onValueChange={(v) => setInstanceFilter(v === '__all__' ? '' : v)}>
+                <SelectTrigger className="h-8 text-xs">
+                  <MessageSquare className="h-3 w-3 mr-1" />
+                  <SelectValue placeholder="Filter by Instance..." />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__all__">Semua Instance</SelectItem>
+                  {waInstances.map((inst) => (
+                    <SelectItem key={inst.id} value={inst.id}>
+                      {inst.name}{inst.phone_number ? ` (${inst.phone_number})` : ''}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
