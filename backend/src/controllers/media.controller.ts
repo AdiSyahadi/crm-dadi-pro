@@ -89,6 +89,8 @@ export class MediaController {
           return;
         }
       }
+      // [DIAG] Temporary logging to trace media proxy resolution
+      console.log('[media-proxy] input:', url, '| base:', org.wa_api_base_url, '| resolved:', resolvedUrl);
 
       // SSRF protection: only allow URLs from WA API origin OR external HTTPS
       let allowedOrigin: string;
@@ -144,6 +146,8 @@ export class MediaController {
       // Stream binary data to client
       response.data.pipe(res);
     } catch (error: any) {
+      // [DIAG] Log fetch failure details
+      console.error('[media-proxy] FETCH FAILED | inputUrl:', req.query.url, '| fetchUrl:', error.config?.url, '| status:', error.response?.status);
       // Forward WA API error status if available
       if (error.response) {
         const status = error.response.status || 500;
