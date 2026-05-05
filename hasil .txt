@@ -1,0 +1,13 @@
+U<LrcSg%=MO=d_|fgSpx3ʐ0!ʢȻC)T$ó|Hy5z^5r0ϤrryJ*=On<*$쭈bYRa5UlU
+                  :GǦo%JmD+XDUA-3܌FzW/fqM=v:9)$zg*cas7TLTTkc!wrX$LռVmX׊V
+                                                                        ڽ:J>t&O
+:Mi̵û֓tp;G2t(œ3+eHt59s]X?YNj~EphUj=k,:I|1ύgRTl</i
+                                               6FMUBnU6A%ZFrgM(Tsy-|"sH&0QmW0?wUǘA6x[#WS[$ٹ3NtNNAszrepu6{nZ_*kMW,/vwlBg%1TȨ
+                                                                                                                           DTP꾲^/j:t"!<Ҕ       ԳT!,PNseg.":Thf.>Qt=8FrU(RTO$# *zʨaܔ,Dᣔ|Pl~+ʳ[mR&JI<yh%v,M1qpsdkf
+                   0Dam"F,HZ@:29c6LsɌcLcg9ɍ9sG
+HTTP_CODE: 200
+root@srv1622729:~# curl -s -w "\nHTTP_CODE: %{http_code}\n" "http://localhost:3001/api/v1/media/c3252c4e-8ddb-407a-8ed0-43745cdf06c6/0f06a071-1a8a-4acc-b259-c679619881f2.jpg" | tail -3
+{"message":"Route GET:/api/v1/media/c3252c4e-8ddb-407a-8ed0-43745cdf06c6/0f06a071-1a8a-4acc-b259-c679619881f2.jpg not found","error":"Not Found","statusCode":404}
+HTTP_CODE: 404
+root@srv1622729:~# ^C
+root@srv1622729:~# 

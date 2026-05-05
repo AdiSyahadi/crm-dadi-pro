@@ -3,6 +3,34 @@ import axios from 'axios';
 import { prisma } from '../config/database';
 import { WAApiClient, resolveDockerUrl } from '../services/wa-api.client';
 
+/**
+ * WA API stores media URLs with /api/media/ path prefix in the database,
+ * but Fastify serves static files at /media/ (without /api prefix).
+ * Nginx routes /media/ to the Next.js frontend instead of Fastify backend,
+ * so we must rewrite the URL to use the internal WA API backend directly.
+ *
+ * Example: https://wapi.abdashboard.com/api/media/{orgId}/file.jpg
+ *       → http://localhost:3001/media/{orgId}/file.jpg
+ */
+function rewriteWaApiMediaUrl(url: string, waApiBaseUrl: string): string {
+  try {
+    const parsedUrl = new URL(url);
+    const baseUrl = new URL(waApiBaseUrl);
+    // Only rewrite if same origin as WA API
+    if (parsedUrl.origin !== baseUrl.origin
+      && resolveDockerUrl(parsedUrl.origin) !== resolveDockerUrl(baseUrl.origin)) {
+      return url;
+    }
+    // Rewrite /api/media/ → /media/ (WA API Fastify serves at /media/)
+    if (parsedUrl.pathname.startsWith('/api/media/')) {
+      parsedUrl.pathname = parsedUrl.pathname.replace('/api/media/', '/media/');
+    }
+    return parsedUrl.href;
+  } catch {
+    return url;
+  }
+}
+
 export class MediaController {
   /**
    * Upload media file — proxies to WA API POST /media/upload.
@@ -76,21 +104,18 @@ export class MediaController {
         return;
       }
 
-      // Resolve relative paths (e.g. /media/org-uuid/file.webp) to full URL using WA API base
+      // Resolve relative paths (e.g. /media/org-uuid/file.webp) to full URL using WA API origin
       let resolvedUrl = url;
       if (url.startsWith('/')) {
         try {
-          const baseUrl = new URL(org.wa_api_base_url);
-          // Preserve the base path (e.g. /api/v1) so /media/... becomes /api/v1/media/...
-          const basePath = baseUrl.pathname.replace(/\/+$/, ''); // trim trailing slashes
-          resolvedUrl = `${baseUrl.origin}${basePath}${url}`;
+          resolvedUrl = new URL(url, org.wa_api_base_url).href;
         } catch {
           res.status(400).json({ success: false, message: 'Invalid relative URL' });
           return;
         }
       }
-      // [DIAG] Temporary logging to trace media proxy resolution
-      console.log('[media-proxy] input:', url, '| base:', org.wa_api_base_url, '| resolved:', resolvedUrl);
+      // Rewrite /api/media/ → /media/ for WA API origin (Fastify serves at /media/)
+      resolvedUrl = rewriteWaApiMediaUrl(resolvedUrl, org.wa_api_base_url);
 
       // SSRF protection: only allow URLs from WA API origin OR external HTTPS
       let allowedOrigin: string;
@@ -146,8 +171,6 @@ export class MediaController {
       // Stream binary data to client
       response.data.pipe(res);
     } catch (error: any) {
-      // [DIAG] Log fetch failure details
-      console.error('[media-proxy] FETCH FAILED | inputUrl:', req.query.url, '| fetchUrl:', error.config?.url, '| status:', error.response?.status);
       // Forward WA API error status if available
       if (error.response) {
         const status = error.response.status || 500;
@@ -193,18 +216,18 @@ export class MediaController {
         return;
       }
 
-      // Resolve relative paths (e.g. /media/org-uuid/file.webp) to full URL using WA API base
+      // Resolve relative paths (e.g. /media/org-uuid/file.webp) to full URL using WA API origin
       let resolvedUrl = url;
       if (url.startsWith('/')) {
         try {
-          const baseUrl = new URL(org.wa_api_base_url);
-          const basePath = baseUrl.pathname.replace(/\/+$/, '');
-          resolvedUrl = `${baseUrl.origin}${basePath}${url}`;
+          resolvedUrl = new URL(url, org.wa_api_base_url).href;
         } catch {
           res.status(400).json({ success: false, message: 'Invalid relative URL' });
           return;
         }
       }
+      // Rewrite /api/media/ → /media/ for WA API origin (Fastify serves at /media/)
+      resolvedUrl = rewriteWaApiMediaUrl(resolvedUrl, org.wa_api_base_url);
 
       // SSRF protection: only allow URLs from WA API origin OR external HTTPS
       let allowedOrigin: string;
