@@ -76,11 +76,14 @@ export class MediaController {
         return;
       }
 
-      // Resolve relative paths (e.g. /media/org-uuid/file.webp) to full URL using WA API origin
+      // Resolve relative paths (e.g. /media/org-uuid/file.webp) to full URL using WA API base
       let resolvedUrl = url;
       if (url.startsWith('/')) {
         try {
-          resolvedUrl = new URL(url, org.wa_api_base_url).href;
+          const baseUrl = new URL(org.wa_api_base_url);
+          // Preserve the base path (e.g. /api/v1) so /media/... becomes /api/v1/media/...
+          const basePath = baseUrl.pathname.replace(/\/+$/, ''); // trim trailing slashes
+          resolvedUrl = `${baseUrl.origin}${basePath}${url}`;
         } catch {
           res.status(400).json({ success: false, message: 'Invalid relative URL' });
           return;
@@ -186,11 +189,13 @@ export class MediaController {
         return;
       }
 
-      // Resolve relative paths (e.g. /media/org-uuid/file.webp) to full URL using WA API origin
+      // Resolve relative paths (e.g. /media/org-uuid/file.webp) to full URL using WA API base
       let resolvedUrl = url;
       if (url.startsWith('/')) {
         try {
-          resolvedUrl = new URL(url, org.wa_api_base_url).href;
+          const baseUrl = new URL(org.wa_api_base_url);
+          const basePath = baseUrl.pathname.replace(/\/+$/, '');
+          resolvedUrl = `${baseUrl.origin}${basePath}${url}`;
         } catch {
           res.status(400).json({ success: false, message: 'Invalid relative URL' });
           return;
