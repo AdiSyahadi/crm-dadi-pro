@@ -89,7 +89,7 @@ export class WAApiClient {
     const fullUrl = `${this.client.defaults.baseURL}/instances/${instanceId}/connect`;
     console.log(`🔍 connectInstance: POST ${fullUrl}`);
     try {
-      const { data } = await this.client.post(`/instances/${instanceId}/connect`);
+      const { data } = await this.client.post(`/instances/${instanceId}/connect`, {});
       const result = data?.data || data;
       console.log(`🔍 connectInstance: response status=${result?.status}, has_qr=${!!result?.qr_code}`);
       if (result?.status === 'CONNECTED') {
