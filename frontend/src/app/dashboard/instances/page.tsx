@@ -46,6 +46,34 @@ export default function InstancesPage() {
     refetchInterval: 30000, // Auto-refresh every 30s to keep status up-to-date
   });
 
+  // Poll QR code every 3 seconds when QR dialog is open
+  useEffect(() => {
+    if (!qrDialog.open || !qrDialog.instanceId) return;
+    // Only poll if we have a QR or if status indicates QR might be coming
+    if (!qrDialog.qr && qrDialog.errorMsg) return;
+
+    const interval = setInterval(async () => {
+      try {
+        const { data } = await api.get(`/instances/${qrDialog.instanceId}/qr/poll`);
+        const result = data.data;
+        if (result?.status === 'CONNECTED') {
+          clearInterval(interval);
+          setQrDialog({ open: false, instanceId: '', qr: '', errorMsg: '' });
+          queryClient.invalidateQueries({ queryKey: ['instances'] });
+          toast.success('WhatsApp berhasil terhubung!');
+          return;
+        }
+        if (result?.qr) {
+          setQrDialog((prev) => ({ ...prev, qr: result.qr }));
+        }
+      } catch {
+        // Silently ignore poll errors
+      }
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, [qrDialog.open, qrDialog.instanceId, qrDialog.qr, qrDialog.errorMsg, queryClient]);
+
   const { data: waApiSettings } = useQuery({
     queryKey: ['wa-api-settings'],
     queryFn: async () => {

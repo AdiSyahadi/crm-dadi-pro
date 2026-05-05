@@ -167,22 +167,15 @@ export class WAInstanceService {
     try {
       const waClient = await WAApiClient.forOrganization(organizationId);
 
-      // Check remote status first
-      const remoteStatus = await waClient.getInstanceStatus(instance.wa_instance_id);
+      // Step 1: Call POST /instances/:id/connect to start connection & generate QR
+      const connectResult = await waClient.connectInstance(instance.wa_instance_id);
 
-      if (!remoteStatus) {
-        throw AppError.notFound(
-          `Instance "${instance.name}" tidak ditemukan di WA API. Hapus dan tambahkan ulang dengan ID yang benar.`
-        );
-      }
-
-      // If already connected, sync status and inform user
-      if (remoteStatus.status === 'connected') {
+      // Already connected
+      if (connectResult.status === 'CONNECTED') {
         await prisma.wAInstance.update({
           where: { id: instance.id },
           data: {
             status: 'CONNECTED' as any,
-            phone_number: remoteStatus.phone_number || instance.phone_number,
             last_synced_at: new Date(),
             connected_at: instance.connected_at || new Date(),
           },
@@ -190,21 +183,36 @@ export class WAInstanceService {
         return { qr: null, status: 'connected', message: 'Instance sudah terhubung! Tidak perlu scan QR lagi.' };
       }
 
-      // Not connected — try to get QR code from WA API
-      const qrResult = await waClient.getInstanceQR(instance.wa_instance_id);
-      if (qrResult.qr) {
+      // Error from connect
+      if (connectResult.status === 'ERROR') {
+        return { qr: null, status: 'error', message: connectResult.message || 'Gagal memulai koneksi.' };
+      }
+
+      // QR ready from connect response
+      if (connectResult.qr) {
         return {
-          qr: qrResult.qr,
-          status: remoteStatus.status,
+          qr: connectResult.qr,
+          status: 'qr_ready',
+          expires_in: connectResult.expires_in,
           message: 'Scan QR code ini dengan WhatsApp di HP Anda.',
         };
       }
 
-      // QR not available — fallback to dashboard redirect
+      // Connect succeeded but no QR in response — try GET /qr
+      const qrResult = await waClient.getInstanceQR(instance.wa_instance_id);
+      if (qrResult.qr) {
+        return {
+          qr: qrResult.qr,
+          status: 'qr_ready',
+          expires_in: qrResult.expires_in,
+          message: 'Scan QR code ini dengan WhatsApp di HP Anda.',
+        };
+      }
+
       return {
         qr: null,
-        status: remoteStatus.status,
-        message: qrResult.message || 'Untuk scan QR, buka WA API Dashboard lalu hubungkan instance dari sana.',
+        status: connectResult.status,
+        message: qrResult.message || 'QR Code belum tersedia. Coba lagi dalam beberapa detik.',
       };
     } catch (error: any) {
       if (error instanceof AppError) throw error;
@@ -214,6 +222,34 @@ export class WAInstanceService {
       }
       throw AppError.badRequest('Tidak dapat terhubung ke WA API. Pastikan WA API sudah berjalan.');
     }
+  }
+
+  // Poll QR code (called by frontend every 3-5 seconds)
+  async pollQR(organizationId: string, instanceId: string) {
+    const instance = await this.getById(organizationId, instanceId);
+    const waClient = await WAApiClient.forOrganization(organizationId);
+
+    // Check status first
+    const statusResult = await waClient.getInstanceStatusDirect(instance.wa_instance_id);
+    if (statusResult.status === 'CONNECTED') {
+      await prisma.wAInstance.update({
+        where: { id: instance.id },
+        data: {
+          status: 'CONNECTED' as any,
+          last_synced_at: new Date(),
+          connected_at: instance.connected_at || new Date(),
+        },
+      });
+      return { qr: null, status: 'CONNECTED' };
+    }
+
+    // Get latest QR
+    const qrResult = await waClient.getInstanceQR(instance.wa_instance_id);
+    return {
+      qr: qrResult.qr || null,
+      status: statusResult.status,
+      expires_in: qrResult.expires_in,
+    };
   }
 
   // Fetch available instances from friend's WA API

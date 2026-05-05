@@ -84,27 +84,54 @@ export class WAApiClient {
     };
   }
 
-  // GET /instances/:id/qr — get QR code as base64 image (Baileys-based WA API)
-  async getInstanceQR(instanceId: string): Promise<{ qr: string | null; message?: string }> {
+  // POST /instances/:id/connect — start connection, generate QR code
+  async connectInstance(instanceId: string): Promise<{ qr: string | null; status: string; expires_in?: number; message?: string }> {
+    try {
+      const { data } = await this.client.post(`/instances/${instanceId}/connect`);
+      const result = data?.data || data;
+      if (result?.status === 'CONNECTED') {
+        return { qr: null, status: 'CONNECTED', message: 'Instance sudah terhubung!' };
+      }
+      const qr = result?.qr_code || null;
+      return {
+        qr: qr || null,
+        status: result?.status || 'QR_READY',
+        expires_in: result?.expires_in,
+      };
+    } catch (err: any) {
+      const errMsg = err.response?.data?.error?.message || err.response?.data?.message || err.message;
+      return { qr: null, status: 'ERROR', message: errMsg || 'Gagal memulai koneksi WA API.' };
+    }
+  }
+
+  // GET /instances/:id/qr — get active QR code as base64 image
+  async getInstanceQR(instanceId: string): Promise<{ qr: string | null; expires_in?: number; message?: string }> {
     try {
       const { data } = await this.client.get(`/instances/${instanceId}/qr`);
-      const qrData = data?.data || data;
-      // Baileys API typically returns { qr: "base64..." } or { qr: "data:image/png;base64,..." }
-      const qr = qrData?.qr || qrData?.qr_code || qrData?.qrcode || null;
-      if (qr) {
-        // Ensure it has proper data URI prefix for <img src>
-        const qrSrc = qr.startsWith('data:') ? qr : `data:image/png;base64,${qr}`;
-        return { qr: qrSrc };
-      }
-      return { qr: null, message: qrData?.message || 'QR Code tidak tersedia. Instance mungkin sudah terhubung.' };
+      const result = data?.data || data;
+      const qr = result?.qr_code || null;
+      return {
+        qr: qr || null,
+        expires_in: result?.expires_in,
+        message: qr ? undefined : 'QR Code tidak tersedia.',
+      };
     } catch (err: any) {
-      if (err.response?.status === 404) {
-        return { qr: null, message: 'Endpoint QR tidak ditemukan di WA API. Buka WA API Dashboard untuk scan QR.' };
-      }
+      const errMsg = err.response?.data?.error?.message || err.response?.data?.message || '';
       if (err.response?.status === 400) {
-        return { qr: null, message: err.response?.data?.message || 'Instance sudah terhubung, tidak perlu scan QR.' };
+        return { qr: null, message: errMsg || 'QR belum tersedia. Panggil connect terlebih dahulu.' };
       }
-      return { qr: null, message: 'Gagal mendapatkan QR Code dari WA API.' };
+      return { qr: null, message: errMsg || 'Gagal mendapatkan QR Code dari WA API.' };
+    }
+  }
+
+  // GET /instances/:id/status — get real-time connection status
+  async getInstanceStatusDirect(instanceId: string): Promise<{ status: string }> {
+    try {
+      const { data } = await this.client.get(`/instances/${instanceId}/status`);
+      const result = data?.data || data;
+      return { status: result?.status || 'DISCONNECTED' };
+    } catch {
+      return { status: 'DISCONNECTED' };
     }
   }
 

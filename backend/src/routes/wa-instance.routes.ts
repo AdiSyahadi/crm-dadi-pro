@@ -16,6 +16,7 @@ router.patch('/:id', authorize('OWNER', 'ADMIN'), waInstanceController.update);
 router.delete('/:id', authorize('OWNER', 'ADMIN'), waInstanceController.delete);
 router.get('/:id/status', waInstanceController.getStatus);
 router.get('/:id/qr', waInstanceController.getQR);
+router.get('/:id/qr/poll', waInstanceController.pollQR);
 router.post('/:id/sync', authorize('OWNER', 'ADMIN'), waInstanceController.syncMessages);
 router.post('/:id/reconnect', authorize('OWNER', 'ADMIN'), waInstanceController.reconnect);
 

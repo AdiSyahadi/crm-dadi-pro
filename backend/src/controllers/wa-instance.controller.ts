@@ -70,6 +70,15 @@ export class WAInstanceController {
     }
   }
 
+  async pollQR(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const result = await waInstanceService.pollQR(req.user!.organizationId, req.params.id as string);
+      sendSuccess(res, result);
+    } catch (error) {
+      next(error);
+    }
+  }
+
   async fetchRemote(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const remoteInstances = await waInstanceService.fetchRemoteInstances(req.user!.organizationId);
