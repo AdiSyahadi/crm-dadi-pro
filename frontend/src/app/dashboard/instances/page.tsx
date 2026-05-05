@@ -199,13 +199,11 @@ export default function InstancesPage() {
       });
     },
     onError: (err: any) => {
-      const msg = err.response?.data?.error?.message || '';
-      if (msg.includes('not configured')) {
+      const msg = err.response?.data?.error?.message || err.message || 'Gagal mendapatkan QR';
+      if (msg.includes('not configured') || msg.includes('belum dikonfigurasi')) {
         setQrDialog({ open: true, instanceId: '', qr: '', errorMsg: 'not_configured' });
-      } else if (msg.includes('tidak ditemukan')) {
-        setQrDialog({ open: true, instanceId: '', qr: '', errorMsg: msg });
       } else {
-        toast.error(msg || 'Gagal mendapatkan QR');
+        setQrDialog({ open: true, instanceId: '', qr: '', errorMsg: msg });
       }
     },
   });

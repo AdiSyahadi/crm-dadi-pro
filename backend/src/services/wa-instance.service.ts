@@ -163,12 +163,22 @@ export class WAInstanceService {
   }
 
   async getQR(organizationId: string, instanceId: string) {
-    const instance = await this.getById(organizationId, instanceId);
     try {
-      const waClient = await WAApiClient.forOrganization(organizationId);
+      const instance = await this.getById(organizationId, instanceId);
+
+      let waClient: WAApiClient;
+      try {
+        waClient = await WAApiClient.forOrganization(organizationId);
+      } catch (e: any) {
+        console.error('❌ getQR: WA API not configured:', e.message);
+        throw AppError.badRequest(e.message || 'WhatsApp API belum dikonfigurasi.');
+      }
+
+      console.log(`🔍 getQR: connecting instance ${instance.wa_instance_id} via WA API...`);
 
       // Step 1: Call POST /instances/:id/connect to start connection & generate QR
       const connectResult = await waClient.connectInstance(instance.wa_instance_id);
+      console.log(`🔍 getQR: connect result:`, JSON.stringify(connectResult));
 
       // Already connected
       if (connectResult.status === 'CONNECTED') {
@@ -199,7 +209,10 @@ export class WAInstanceService {
       }
 
       // Connect succeeded but no QR in response — try GET /qr
+      console.log(`🔍 getQR: no QR in connect response, trying GET /qr...`);
       const qrResult = await waClient.getInstanceQR(instance.wa_instance_id);
+      console.log(`🔍 getQR: qr result:`, JSON.stringify({ qr: qrResult.qr ? '(base64 data)' : null, message: qrResult.message }));
+
       if (qrResult.qr) {
         return {
           qr: qrResult.qr,
@@ -215,12 +228,13 @@ export class WAInstanceService {
         message: qrResult.message || 'QR Code belum tersedia. Coba lagi dalam beberapa detik.',
       };
     } catch (error: any) {
+      console.error('❌ getQR error:', error.message, error.response?.status, JSON.stringify(error.response?.data));
       if (error instanceof AppError) throw error;
-      const status = error.response?.status || error.status;
-      if (status === 401 || status === 403) {
+      const errStatus = error.response?.status || error.status;
+      if (errStatus === 401 || errStatus === 403) {
         throw AppError.badRequest('API Key tidak valid. Periksa konfigurasi WA API di Settings.');
       }
-      throw AppError.badRequest('Tidak dapat terhubung ke WA API. Pastikan WA API sudah berjalan.');
+      throw AppError.badRequest(`Gagal mendapatkan QR: ${error.message || 'Unknown error'}`);
     }
   }
 
