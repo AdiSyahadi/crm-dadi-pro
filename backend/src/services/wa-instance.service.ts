@@ -190,11 +190,21 @@ export class WAInstanceService {
         return { qr: null, status: 'connected', message: 'Instance sudah terhubung! Tidak perlu scan QR lagi.' };
       }
 
-      // Not connected — QR only available via WA API Dashboard
+      // Not connected — try to get QR code from WA API
+      const qrResult = await waClient.getInstanceQR(instance.wa_instance_id);
+      if (qrResult.qr) {
+        return {
+          qr: qrResult.qr,
+          status: remoteStatus.status,
+          message: 'Scan QR code ini dengan WhatsApp di HP Anda.',
+        };
+      }
+
+      // QR not available — fallback to dashboard redirect
       return {
         qr: null,
         status: remoteStatus.status,
-        message: 'Untuk scan QR, buka WA API Dashboard di http://localhost:3000 lalu hubungkan instance dari sana.',
+        message: qrResult.message || 'Untuk scan QR, buka WA API Dashboard lalu hubungkan instance dari sana.',
       };
     } catch (error: any) {
       if (error instanceof AppError) throw error;

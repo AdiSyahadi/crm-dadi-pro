@@ -84,9 +84,28 @@ export class WAApiClient {
     };
   }
 
-  // QR code is only available via WA API Dashboard (port 3000), not via REST API
-  async getInstanceQR(_instanceId: string) {
-    return { qr: null, message: 'QR Code hanya tersedia di WA API Dashboard (port 3000). Buka dashboard untuk scan QR.' };
+  // GET /instances/:id/qr — get QR code as base64 image (Baileys-based WA API)
+  async getInstanceQR(instanceId: string): Promise<{ qr: string | null; message?: string }> {
+    try {
+      const { data } = await this.client.get(`/instances/${instanceId}/qr`);
+      const qrData = data?.data || data;
+      // Baileys API typically returns { qr: "base64..." } or { qr: "data:image/png;base64,..." }
+      const qr = qrData?.qr || qrData?.qr_code || qrData?.qrcode || null;
+      if (qr) {
+        // Ensure it has proper data URI prefix for <img src>
+        const qrSrc = qr.startsWith('data:') ? qr : `data:image/png;base64,${qr}`;
+        return { qr: qrSrc };
+      }
+      return { qr: null, message: qrData?.message || 'QR Code tidak tersedia. Instance mungkin sudah terhubung.' };
+    } catch (err: any) {
+      if (err.response?.status === 404) {
+        return { qr: null, message: 'Endpoint QR tidak ditemukan di WA API. Buka WA API Dashboard untuk scan QR.' };
+      }
+      if (err.response?.status === 400) {
+        return { qr: null, message: err.response?.data?.message || 'Instance sudah terhubung, tidak perlu scan QR.' };
+      }
+      return { qr: null, message: 'Gagal mendapatkan QR Code dari WA API.' };
+    }
   }
 
   // ===== Messaging =====
