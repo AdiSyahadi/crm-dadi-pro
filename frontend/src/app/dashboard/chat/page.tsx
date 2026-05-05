@@ -150,6 +150,7 @@ export default function ChatPage() {
   const [saveFilterOpen, setSaveFilterOpen] = useState(false);
   const [labelDialogOpen, setLabelDialogOpen] = useState(false);
   const [newLabel, setNewLabel] = useState('');
+  const [newLabelColor, setNewLabelColor] = useState('#6366f1');
 
   // Detect text selection in textarea
   const handleTextSelect = useCallback(() => {
@@ -386,8 +387,8 @@ export default function ChatPage() {
 
   // Label mutations
   const addLabelMutation = useMutation({
-    mutationFn: async ({ convId, label }: { convId: string; label: string }) => {
-      await api.post(`/conversations/${convId}/labels`, { label });
+    mutationFn: async ({ convId, label, color }: { convId: string; label: string; color?: string }) => {
+      await api.post(`/conversations/${convId}/labels`, { label, color });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['conversations'] });
@@ -1732,7 +1733,7 @@ export default function ChatPage() {
         </DialogContent>
       </Dialog>
       {/* Label Dialog */}
-      <Dialog open={labelDialogOpen} onOpenChange={(o) => { setLabelDialogOpen(o); if (!o) setNewLabel(''); }}>
+      <Dialog open={labelDialogOpen} onOpenChange={(o) => { setLabelDialogOpen(o); if (!o) { setNewLabel(''); setNewLabelColor('#6366f1'); } }}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -1751,21 +1752,35 @@ export default function ChatPage() {
               ))}
             </div>
           )}
-          <div className="flex gap-2">
-            <Input
-              placeholder="Tambah label baru..."
-              value={newLabel}
-              onChange={(e) => setNewLabel(e.target.value)}
-              className="flex-1 h-9"
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && newLabel.trim() && selectedId) {
-                  addLabelMutation.mutate({ convId: selectedId, label: newLabel.trim() });
-                }
-              }}
-            />
-            <Button size="sm" className="h-9" disabled={!newLabel.trim() || addLabelMutation.isPending} onClick={() => selectedId && newLabel.trim() && addLabelMutation.mutate({ convId: selectedId, label: newLabel.trim() })}>
-              Tambah
-            </Button>
+          <div className="space-y-2">
+            <div className="flex gap-2">
+              <Input
+                placeholder="Tambah label baru..."
+                value={newLabel}
+                onChange={(e) => setNewLabel(e.target.value)}
+                className="flex-1 h-9"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && newLabel.trim() && selectedId) {
+                    addLabelMutation.mutate({ convId: selectedId, label: newLabel.trim(), color: newLabelColor });
+                  }
+                }}
+              />
+              <Button size="sm" className="h-9" disabled={!newLabel.trim() || addLabelMutation.isPending} onClick={() => selectedId && newLabel.trim() && addLabelMutation.mutate({ convId: selectedId, label: newLabel.trim(), color: newLabelColor })}>
+                Tambah
+              </Button>
+            </div>
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-xs text-muted-foreground">Warna:</span>
+              {['#ef4444','#f97316','#eab308','#22c55e','#06b6d4','#3b82f6','#6366f1','#a855f7','#ec4899','#78716c'].map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  className={cn('h-5 w-5 rounded-full border-2 transition-transform hover:scale-110', newLabelColor === c ? 'border-foreground scale-110' : 'border-transparent')}
+                  style={{ backgroundColor: c }}
+                  onClick={() => setNewLabelColor(c)}
+                />
+              ))}
+            </div>
           </div>
           {availableLabels.length > 0 && (
             <div className="space-y-1">
