@@ -1066,6 +1066,8 @@ model Automation {
   action_type   AutomationAction
   action_config Json?
 
+  wa_instance_id  String?
+
   is_active       Boolean @default(true)
   priority        Int     @default(0)
   execution_count Int     @default(0)
@@ -1073,6 +1075,7 @@ model Automation {
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
 
+  @@index([organization_id])
   @@map("automations")
 }
 
@@ -1333,9 +1336,10 @@ model AutoResponse {
   organization_id String
   organization    Organization @relation(fields: [organization_id], references: [id], onDelete: Cascade)
 
-  trigger      AutoResponseTrigger
-  template_id  String
-  template     MessageTemplate @relation(fields: [template_id], references: [id])
+  trigger         AutoResponseTrigger
+  template_id     String
+  template        MessageTemplate @relation(fields: [template_id], references: [id])
+  wa_instance_id  String?
 
   // Business hours config (for OUTSIDE_HOURS trigger)
   business_hour_start String?  // e.g. "08:00"
@@ -1351,7 +1355,7 @@ model AutoResponse {
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
 
-  @@unique([organization_id, trigger])
+  @@index([organization_id, trigger])
   @@map("auto_responses")
 }
 

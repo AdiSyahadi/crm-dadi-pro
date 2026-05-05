@@ -45,6 +45,7 @@ import {
   CreditCard,
   Wallet,
   Save,
+  Smartphone,
 } from 'lucide-react';
 import { WebhookSettings } from '@/components/settings/webhook-settings';
 import { toast } from 'sonner';
@@ -110,6 +111,8 @@ export default function SettingsPage() {
   const [arOutsideStart, setArOutsideStart] = useState('08:00');
   const [arOutsideEnd, setArOutsideEnd] = useState('17:00');
   const [arOutsideDays, setArOutsideDays] = useState<number[]>([1,2,3,4,5]);
+  const [arNewChatInstanceId, setArNewChatInstanceId] = useState('');
+  const [arOutsideInstanceId, setArOutsideInstanceId] = useState('');
 
   const initials = user?.name
     ?.split(' ')
@@ -206,6 +209,15 @@ export default function SettingsPage() {
   });
 
   // Auto-response queries
+  const { data: arInstances = [] } = useQuery({
+    queryKey: ['instances'],
+    queryFn: async () => {
+      const { data } = await api.get('/instances');
+      return (data.data || []) as { id: string; name: string; phone_number: string | null }[];
+    },
+    staleTime: 60_000,
+  });
+
   const { data: arRules = [], isLoading: arLoading } = useQuery({
     queryKey: ['auto-responses'],
     queryFn: async () => {
@@ -229,11 +241,13 @@ export default function SettingsPage() {
     if (newChat) {
       setArNewChatTemplateId(newChat.template_id);
       setArNewChatCooldown(newChat.cooldown_minutes);
+      setArNewChatInstanceId(newChat.wa_instance_id || '');
     }
     const outside = arRules.find((r: any) => r.trigger === 'OUTSIDE_HOURS');
     if (outside) {
       setArOutsideTemplateId(outside.template_id);
       setArOutsideCooldown(outside.cooldown_minutes);
+      setArOutsideInstanceId(outside.wa_instance_id || '');
       if (outside.business_hour_start) setArOutsideStart(outside.business_hour_start);
       if (outside.business_hour_end) setArOutsideEnd(outside.business_hour_end);
       if (Array.isArray(outside.business_days)) setArOutsideDays(outside.business_days);
@@ -753,7 +767,22 @@ export default function SettingsPage() {
                       <Input type="number" min={1} max={1440} value={arNewChatCooldown} onChange={(e) => setArNewChatCooldown(parseInt(e.target.value) || 60)} />
                       <p className="text-xs text-muted-foreground">Jeda minimum sebelum mengirim ulang ke kontak yang sama.</p>
                     </div>
-                    <Button disabled={!arNewChatTemplateId || arUpsertMutation.isPending} onClick={() => arUpsertMutation.mutate({ trigger: 'NEW_CHAT', template_id: arNewChatTemplateId, cooldown_minutes: arNewChatCooldown })}>
+                    {arInstances.length > 1 && (
+                      <div className="space-y-2">
+                        <Label>Instance WhatsApp <span className="text-muted-foreground text-xs">(opsional)</span></Label>
+                        <Select value={arNewChatInstanceId || '__all__'} onValueChange={(v) => setArNewChatInstanceId(v === '__all__' ? '' : v)}>
+                          <SelectTrigger><SelectValue placeholder="Pilih instance..." /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__all__">Semua Instance</SelectItem>
+                            {arInstances.map((inst) => (
+                              <SelectItem key={inst.id} value={inst.id}>{inst.name}{inst.phone_number ? ` (${inst.phone_number})` : ''}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <p className="text-xs text-muted-foreground">Jika dipilih, greeting hanya berlaku untuk instance tersebut.</p>
+                      </div>
+                    )}
+                    <Button disabled={!arNewChatTemplateId || arUpsertMutation.isPending} onClick={() => arUpsertMutation.mutate({ trigger: 'NEW_CHAT', template_id: arNewChatTemplateId, cooldown_minutes: arNewChatCooldown, wa_instance_id: arNewChatInstanceId || undefined })}>
                       {arUpsertMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
                       {rule ? 'Perbarui' : 'Simpan'}
                     </Button>
@@ -825,7 +854,22 @@ export default function SettingsPage() {
                       <Label>Cooldown (menit)</Label>
                       <Input type="number" min={1} max={1440} value={arOutsideCooldown} onChange={(e) => setArOutsideCooldown(parseInt(e.target.value) || 60)} />
                     </div>
-                    <Button disabled={!arOutsideTemplateId || arUpsertMutation.isPending} onClick={() => arUpsertMutation.mutate({ trigger: 'OUTSIDE_HOURS', template_id: arOutsideTemplateId, business_hour_start: arOutsideStart, business_hour_end: arOutsideEnd, business_days: arOutsideDays, cooldown_minutes: arOutsideCooldown })}>
+                    {arInstances.length > 1 && (
+                      <div className="space-y-2">
+                        <Label>Instance WhatsApp <span className="text-muted-foreground text-xs">(opsional)</span></Label>
+                        <Select value={arOutsideInstanceId || '__all__'} onValueChange={(v) => setArOutsideInstanceId(v === '__all__' ? '' : v)}>
+                          <SelectTrigger><SelectValue placeholder="Pilih instance..." /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__all__">Semua Instance</SelectItem>
+                            {arInstances.map((inst) => (
+                              <SelectItem key={inst.id} value={inst.id}>{inst.name}{inst.phone_number ? ` (${inst.phone_number})` : ''}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <p className="text-xs text-muted-foreground">Jika dipilih, auto-response hanya berlaku untuk instance tersebut.</p>
+                      </div>
+                    )}
+                    <Button disabled={!arOutsideTemplateId || arUpsertMutation.isPending} onClick={() => arUpsertMutation.mutate({ trigger: 'OUTSIDE_HOURS', template_id: arOutsideTemplateId, business_hour_start: arOutsideStart, business_hour_end: arOutsideEnd, business_days: arOutsideDays, cooldown_minutes: arOutsideCooldown, wa_instance_id: arOutsideInstanceId || undefined })}>
                       {arUpsertMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
                       {rule ? 'Perbarui' : 'Simpan'}
                     </Button>

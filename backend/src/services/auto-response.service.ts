@@ -5,6 +5,7 @@ import { AutoResponseTrigger } from '@prisma/client';
 export interface UpsertAutoResponseInput {
   trigger: AutoResponseTrigger;
   template_id: string;
+  wa_instance_id?: string | null;
   business_hour_start?: string | null;
   business_hour_end?: string | null;
   business_days?: number[] | null;
@@ -31,17 +32,42 @@ export class AutoResponseService {
     });
     if (!template) throw AppError.notFound('Template not found');
 
-    return prisma.autoResponse.upsert({
+    const instanceId = input.wa_instance_id || null;
+
+    // Find existing rule for this org + trigger + instance
+    const existing = await prisma.autoResponse.findFirst({
       where: {
-        organization_id_trigger: {
-          organization_id: organizationId,
-          trigger: input.trigger,
-        },
+        organization_id: organizationId,
+        trigger: input.trigger,
+        wa_instance_id: instanceId,
       },
-      create: {
+    });
+
+    if (existing) {
+      return prisma.autoResponse.update({
+        where: { id: existing.id },
+        data: {
+          template_id: input.template_id,
+          wa_instance_id: instanceId,
+          business_hour_start: input.business_hour_start ?? undefined,
+          business_hour_end: input.business_hour_end ?? undefined,
+          business_days: input.business_days !== undefined ? (input.business_days ? JSON.parse(JSON.stringify(input.business_days)) : null) : undefined,
+          timezone: input.timezone ?? undefined,
+          cooldown_minutes: input.cooldown_minutes ?? undefined,
+          is_active: input.is_active ?? undefined,
+        },
+        include: {
+          template: { select: { id: true, name: true, category: true, content: true } },
+        },
+      });
+    }
+
+    return prisma.autoResponse.create({
+      data: {
         organization_id: organizationId,
         trigger: input.trigger,
         template_id: input.template_id,
+        wa_instance_id: instanceId,
         business_hour_start: input.business_hour_start || null,
         business_hour_end: input.business_hour_end || null,
         business_days: input.business_days ? JSON.parse(JSON.stringify(input.business_days)) : null,
@@ -49,28 +75,18 @@ export class AutoResponseService {
         cooldown_minutes: input.cooldown_minutes ?? 60,
         is_active: input.is_active ?? true,
       },
-      update: {
-        template_id: input.template_id,
-        business_hour_start: input.business_hour_start ?? undefined,
-        business_hour_end: input.business_hour_end ?? undefined,
-        business_days: input.business_days !== undefined ? (input.business_days ? JSON.parse(JSON.stringify(input.business_days)) : null) : undefined,
-        timezone: input.timezone ?? undefined,
-        cooldown_minutes: input.cooldown_minutes ?? undefined,
-        is_active: input.is_active ?? undefined,
-      },
       include: {
         template: { select: { id: true, name: true, category: true, content: true } },
       },
     });
   }
 
-  async delete(organizationId: string, trigger: AutoResponseTrigger) {
-    const existing = await prisma.autoResponse.findUnique({
+  async delete(organizationId: string, trigger: AutoResponseTrigger, waInstanceId?: string | null) {
+    const existing = await prisma.autoResponse.findFirst({
       where: {
-        organization_id_trigger: {
-          organization_id: organizationId,
-          trigger,
-        },
+        organization_id: organizationId,
+        trigger,
+        wa_instance_id: waInstanceId || null,
       },
     });
     if (!existing) throw AppError.notFound('Auto-response rule not found');

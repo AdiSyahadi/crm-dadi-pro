@@ -23,7 +23,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Bot, Plus, Trash2, Pencil, Copy, Zap, Power, MessageSquare } from 'lucide-react';
+import { Bot, Plus, Trash2, Pencil, Copy, Zap, Power, MessageSquare, Smartphone } from 'lucide-react';
 import { toast } from 'sonner';
 
 const TRIGGER_LABELS: Record<string, string> = {
@@ -54,6 +54,7 @@ interface FormState {
   action_config: any;
   priority: number;
   is_active: boolean;
+  wa_instance_id: string;
 }
 
 const defaultForm: FormState = {
@@ -65,6 +66,7 @@ const defaultForm: FormState = {
   action_config: { message: '' },
   priority: 0,
   is_active: true,
+  wa_instance_id: '',
 };
 
 export default function ChatbotPage() {
@@ -73,6 +75,15 @@ export default function ChatbotPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(defaultForm);
   const [keywordsInput, setKeywordsInput] = useState('');
+
+  const { data: waInstances = [] } = useQuery({
+    queryKey: ['instances'],
+    queryFn: async () => {
+      const { data } = await api.get('/instances');
+      return (data.data || []) as { id: string; name: string; phone_number: string | null }[];
+    },
+    staleTime: 60_000,
+  });
 
   const { data: flows = [], isLoading } = useQuery({
     queryKey: ['chatbot-flows'],
@@ -133,18 +144,20 @@ export default function ChatbotPage() {
       action_config: ac,
       priority: f.priority,
       is_active: f.is_active,
+      wa_instance_id: f.wa_instance_id || '',
     });
     setKeywordsInput((tc.keywords || []).join(', '));
     setDialogOpen(true);
   };
 
   const handleSave = () => {
-    const payload = { ...form };
+    const payload: any = { ...form };
     if (payload.trigger_type === 'KEYWORD_MATCH') {
       payload.trigger_config = {
-        keywords: keywordsInput.split(',').map(k => k.trim()).filter(Boolean),
+        keywords: keywordsInput.split(',').map((k: string) => k.trim()).filter(Boolean),
       };
     }
+    payload.wa_instance_id = payload.wa_instance_id || undefined;
     saveMutation.mutate(payload);
   };
 
@@ -191,6 +204,12 @@ export default function ChatbotPage() {
                       <Badge variant="secondary" className="text-[10px]">
                         {ACTION_LABELS[f.action_type] || f.action_type}
                       </Badge>
+                      {f.wa_instance_id && (
+                        <span className="text-[10px] text-muted-foreground flex items-center gap-0.5">
+                          <Smartphone className="h-3 w-3" />
+                          {waInstances.find((i: any) => i.id === f.wa_instance_id)?.name || 'Instance'}
+                        </span>
+                      )}
                       <span className="text-[10px] text-muted-foreground ml-2">
                         <MessageSquare className="h-3 w-3 inline" /> {f.execution_count}x
                       </span>
@@ -230,6 +249,23 @@ export default function ChatbotPage() {
               <Label>Deskripsi (opsional)</Label>
               <Input value={form.description} onChange={(e) => setForm(f => ({ ...f, description: e.target.value }))} placeholder="Deskripsi singkat..." />
             </div>
+            {waInstances.length > 1 && (
+              <div>
+                <Label>Instance WhatsApp <span className="text-muted-foreground text-xs">(opsional)</span></Label>
+                <Select value={form.wa_instance_id || '__all__'} onValueChange={(v) => setForm(f => ({ ...f, wa_instance_id: v === '__all__' ? '' : v }))}>
+                  <SelectTrigger><SelectValue placeholder="Pilih instance..." /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__all__">Semua Instance</SelectItem>
+                    {waInstances.map((inst) => (
+                      <SelectItem key={inst.id} value={inst.id}>
+                        {inst.name}{inst.phone_number ? ` (${inst.phone_number})` : ''}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground mt-1">Jika dipilih, flow hanya berlaku untuk instance tersebut.</p>
+              </div>
+            )}
             <div>
               <Label>Trigger</Label>
               <Select value={form.trigger_type} onValueChange={(v) => setForm(f => ({ ...f, trigger_type: v }))}>

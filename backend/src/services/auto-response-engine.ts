@@ -32,7 +32,14 @@ export class AutoResponseEngine {
     if (params.direction !== 'INCOMING') return;
 
     const rules = await prisma.autoResponse.findMany({
-      where: { organization_id: params.organizationId, is_active: true },
+      where: {
+        organization_id: params.organizationId,
+        is_active: true,
+        OR: [
+          { wa_instance_id: null },
+          { wa_instance_id: params.instanceId },
+        ],
+      },
       include: { template: true },
     });
 

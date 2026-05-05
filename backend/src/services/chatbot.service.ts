@@ -26,6 +26,7 @@ export class ChatbotService {
     action_config?: any;
     priority?: number;
     is_active?: boolean;
+    wa_instance_id?: string;
   }) {
     return prisma.automation.create({
       data: {
@@ -38,6 +39,7 @@ export class ChatbotService {
         action_config: data.action_config || {},
         priority: data.priority ?? 0,
         is_active: data.is_active ?? true,
+        wa_instance_id: data.wa_instance_id || null,
       },
     });
   }
@@ -51,6 +53,7 @@ export class ChatbotService {
     action_config?: any;
     priority?: number;
     is_active?: boolean;
+    wa_instance_id?: string | null;
   }) {
     await this.getById(organizationId, id);
 
@@ -63,6 +66,7 @@ export class ChatbotService {
     if (data.action_config !== undefined) updateData.action_config = data.action_config;
     if (data.priority !== undefined) updateData.priority = data.priority;
     if (data.is_active !== undefined) updateData.is_active = data.is_active;
+    if (data.wa_instance_id !== undefined) updateData.wa_instance_id = data.wa_instance_id || null;
 
     return prisma.automation.update({ where: { id }, data: updateData });
   }
@@ -91,6 +95,7 @@ export class ChatbotService {
         trigger_config: original.trigger_config || {},
         action_type: original.action_type,
         action_config: original.action_config || {},
+        wa_instance_id: original.wa_instance_id,
         priority: original.priority,
         is_active: false,
       },
@@ -104,9 +109,17 @@ export class ChatbotService {
     isFirstMessage: boolean;
     contactId: string;
     conversationId: string;
+    instanceId?: string;
   }): Promise<{ matched: boolean; action?: any }> {
     const automations = await prisma.automation.findMany({
-      where: { organization_id: organizationId, is_active: true },
+      where: {
+        organization_id: organizationId,
+        is_active: true,
+        OR: [
+          { wa_instance_id: null },
+          ...(context.instanceId ? [{ wa_instance_id: context.instanceId }] : []),
+        ],
+      },
       orderBy: { priority: 'desc' },
     });
 
