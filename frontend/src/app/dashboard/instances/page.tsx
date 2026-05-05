@@ -30,6 +30,7 @@ export default function InstancesPage() {
   const [remoteInstances, setRemoteInstances] = useState<any[]>([]);
   const [loadingRemote, setLoadingRemote] = useState(false);
   const [remoteError, setRemoteError] = useState('');
+  const [syncingId, setSyncingId] = useState<string | null>(null);
   const [qrDialog, setQrDialog] = useState<{ open: boolean; instanceId: string; qr: string; errorMsg: string }>({
     open: false,
     instanceId: '',
@@ -167,16 +168,19 @@ export default function InstancesPage() {
 
   const syncMutation = useMutation({
     mutationFn: async (id: string) => {
+      setSyncingId(id);
       const { data } = await api.post(`/instances/${id}/sync`);
       return data;
     },
     onSuccess: (data) => {
+      setSyncingId(null);
       queryClient.invalidateQueries({ queryKey: ['instances'] });
       queryClient.invalidateQueries({ queryKey: ['conversations'] });
       const d = data.data;
       toast.success(data.message || `Sync selesai: ${d.conversations} percakapan, ${d.messages} pesan`);
     },
     onError: (err: any) => {
+      setSyncingId(null);
       toast.error(err.response?.data?.error?.message || 'Gagal sync pesan');
     },
   });
@@ -544,14 +548,14 @@ export default function InstancesPage() {
                         size="sm"
                         className="w-full h-8 text-xs"
                         onClick={() => syncMutation.mutate(inst.id)}
-                        disabled={syncMutation.isPending}
+                        disabled={syncingId !== null}
                       >
-                        {syncMutation.isPending ? (
+                        {syncingId === inst.id ? (
                           <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
                         ) : (
                           <Download className="h-3.5 w-3.5 mr-1" />
                         )}
-                        {syncMutation.isPending ? 'Sedang sync...' : 'Sync Pesan dari WA API'}
+                        {syncingId === inst.id ? 'Sedang sync...' : 'Sync Pesan dari WA API'}
                       </Button>
                     )}
                   </div>
