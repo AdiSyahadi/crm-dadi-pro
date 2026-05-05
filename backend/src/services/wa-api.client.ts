@@ -86,9 +86,12 @@ export class WAApiClient {
 
   // POST /instances/:id/connect — start connection, generate QR code
   async connectInstance(instanceId: string): Promise<{ qr: string | null; status: string; expires_in?: number; message?: string }> {
+    const fullUrl = `${this.client.defaults.baseURL}/instances/${instanceId}/connect`;
+    console.log(`🔍 connectInstance: POST ${fullUrl}`);
     try {
       const { data } = await this.client.post(`/instances/${instanceId}/connect`);
       const result = data?.data || data;
+      console.log(`🔍 connectInstance: response status=${result?.status}, has_qr=${!!result?.qr_code}`);
       if (result?.status === 'CONNECTED') {
         return { qr: null, status: 'CONNECTED', message: 'Instance sudah terhubung!' };
       }
@@ -99,6 +102,7 @@ export class WAApiClient {
         expires_in: result?.expires_in,
       };
     } catch (err: any) {
+      console.error(`❌ connectInstance error: status=${err.response?.status}, url=${fullUrl}, data=${JSON.stringify(err.response?.data)}, message=${err.message}`);
       const errMsg = err.response?.data?.error?.message || err.response?.data?.message || err.message;
       return { qr: null, status: 'ERROR', message: errMsg || 'Gagal memulai koneksi WA API.' };
     }
