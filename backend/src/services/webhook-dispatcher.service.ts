@@ -50,8 +50,12 @@ async function _dispatch(
     conversationId: data.conversation_id || null,
   };
 
+  const eventInstanceId = data.instance_id || null;
+
   const tasks = configs
     .filter((cfg) => {
+      // Filter by instance: if webhook is tied to a specific instance, only fire for that instance
+      if (cfg.wa_instance_id && eventInstanceId && cfg.wa_instance_id !== eventInstanceId) return false;
       const events = cfg.events as string[] | null;
       if (!events || events.length === 0) return true;
       return events.includes(event);

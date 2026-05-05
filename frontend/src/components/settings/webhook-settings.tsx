@@ -11,6 +11,13 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
   Dialog,
   DialogContent,
   DialogHeader,
@@ -28,6 +35,7 @@ import {
   Eye,
   EyeOff,
   AlertTriangle,
+  Smartphone,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
@@ -69,6 +77,7 @@ const emptyForm = {
   webhook_url: '',
   webhook_secret: '',
   events: WEBHOOK_EVENTS.map((e) => e.key) as string[],
+  wa_instance_id: '' as string,
 };
 
 export function WebhookSettings() {
@@ -78,6 +87,15 @@ export function WebhookSettings() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [showSecret, setShowSecret] = useState(false);
+
+  const { data: waInstances = [] } = useQuery({
+    queryKey: ['instances'],
+    queryFn: async () => {
+      const { data } = await api.get('/instances');
+      return (data.data || []) as { id: string; name: string; phone_number: string | null }[];
+    },
+    staleTime: 60_000,
+  });
 
   const { data: webhooks = [], isLoading } = useQuery({
     queryKey: ['webhook-configs'],
@@ -92,6 +110,7 @@ export function WebhookSettings() {
       const payload = {
         ...input,
         webhook_secret: input.webhook_secret || undefined,
+        wa_instance_id: input.wa_instance_id || undefined,
       };
       if (editingId) {
         await api.patch(`/webhook-configs/${editingId}`, payload);
@@ -166,6 +185,7 @@ export function WebhookSettings() {
       webhook_url: wh.webhook_url,
       webhook_secret: wh.webhook_secret || '',
       events: (wh.events as string[]) || WEBHOOK_EVENTS.map((e) => e.key),
+      wa_instance_id: wh.wa_instance_id || '',
     });
     setShowSecret(false);
     setDialogOpen(true);
@@ -282,6 +302,14 @@ export function WebhookSettings() {
                           </Badge>
                         )}
                       </div>
+                      {wh.wa_instance_id && (
+                        <div className="flex items-center gap-1 mt-1.5">
+                          <Smartphone className="h-3 w-3 text-muted-foreground" />
+                          <span className="text-[10px] text-muted-foreground">
+                            {waInstances.find((i) => i.id === wh.wa_instance_id)?.name || 'Instance: ' + wh.wa_instance_id.slice(0, 8)}
+                          </span>
+                        </div>
+                      )}
                       {wh.last_triggered_at && (
                         <p className="text-[10px] text-muted-foreground mt-2">
                           Terakhir dipanggil: {new Date(wh.last_triggered_at).toLocaleString('id-ID')}
@@ -400,6 +428,31 @@ export function WebhookSettings() {
                 Jika diisi, CRM akan mengirim header <code className="bg-muted px-1 rounded">X-Webhook-Signature</code> berisi HMAC-SHA256.
               </p>
             </div>
+
+            {waInstances.length > 0 && (
+              <div className="space-y-2">
+                <Label>Instance WhatsApp <span className="text-muted-foreground text-xs">(opsional)</span></Label>
+                <Select
+                  value={form.wa_instance_id || '__all__'}
+                  onValueChange={(v) => setForm({ ...form, wa_instance_id: v === '__all__' ? '' : v })}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Pilih instance..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__all__">Semua Instance</SelectItem>
+                    {waInstances.map((inst) => (
+                      <SelectItem key={inst.id} value={inst.id}>
+                        {inst.name}{inst.phone_number ? ` (${inst.phone_number})` : ''}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Jika dipilih, webhook hanya akan dipanggil untuk event dari instance tersebut. Kosongkan untuk menerima event dari semua instance.
+                </p>
+              </div>
+            )}
 
             <div className="space-y-3">
               <div className="flex items-center justify-between">
