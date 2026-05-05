@@ -16,7 +16,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { toast } from 'sonner';
-import { Plus, Pencil, Trash2, Loader2, Landmark, CreditCard, Save, Eye, EyeOff } from 'lucide-react';
+import { Plus, Pencil, Trash2, Loader2, Landmark, CreditCard, Wallet, Save, Eye, EyeOff } from 'lucide-react';
 
 // ======= Types =======
 interface BankAccount {
@@ -33,6 +33,15 @@ interface MidtransConfig {
   server_key: string;
   server_key_set: boolean;
   client_key: string;
+  environment: string;
+  is_enabled: boolean;
+}
+
+interface FlipConfig {
+  secret_key: string;
+  secret_key_set: boolean;
+  validation_token: string;
+  validation_token_set: boolean;
   environment: string;
   is_enabled: boolean;
 }
@@ -55,6 +64,14 @@ export default function AdminPaymentSettingsPage() {
   const [midtransForm, setMidtransForm] = useState({ merchant_id: '', server_key: '', client_key: '', environment: 'sandbox', is_enabled: false });
   const [midtransSaving, setMidtransSaving] = useState(false);
   const [showServerKey, setShowServerKey] = useState(false);
+
+  // ---- Flip ----
+  const [flipConfig, setFlipConfig] = useState<FlipConfig | null>(null);
+  const [flipLoading, setFlipLoading] = useState(true);
+  const [flipForm, setFlipForm] = useState({ secret_key: '', validation_token: '', environment: 'sandbox', is_enabled: false });
+  const [flipSaving, setFlipSaving] = useState(false);
+  const [showFlipSecret, setShowFlipSecret] = useState(false);
+  const [showFlipToken, setShowFlipToken] = useState(false);
 
   // ---- Fetch Bank Accounts ----
   const fetchBanks = useCallback(() => {
@@ -84,7 +101,25 @@ export default function AdminPaymentSettingsPage() {
       .finally(() => setMidtransLoading(false));
   }, []);
 
-  useEffect(() => { fetchBanks(); fetchMidtrans(); }, [fetchBanks, fetchMidtrans]);
+  // ---- Fetch Flip ----
+  const fetchFlip = useCallback(() => {
+    setFlipLoading(true);
+    api.get('/payment-settings/flip')
+      .then((res) => {
+        const c = res.data.data;
+        setFlipConfig(c);
+        setFlipForm({
+          secret_key: '',
+          validation_token: '',
+          environment: c.environment || 'sandbox',
+          is_enabled: c.is_enabled || false,
+        });
+      })
+      .catch(() => toast.error('Gagal memuat konfigurasi Flip'))
+      .finally(() => setFlipLoading(false));
+  }, []);
+
+  useEffect(() => { fetchBanks(); fetchMidtrans(); fetchFlip(); }, [fetchBanks, fetchMidtrans, fetchFlip]);
 
   // ---- Bank Dialog Handlers ----
   const openCreateBank = () => {
@@ -141,6 +176,30 @@ export default function AdminPaymentSettingsPage() {
       toast.error(err.response?.data?.error?.message || 'Gagal menghapus');
     } finally {
       setDeletingId('');
+    }
+  };
+
+  // ---- Flip Handlers ----
+  const handleSaveFlip = async () => {
+    setFlipSaving(true);
+    try {
+      const payload: any = {
+        environment: flipForm.environment,
+        is_enabled: flipForm.is_enabled ? 'true' : 'false',
+      };
+      if (flipForm.secret_key.trim()) {
+        payload.secret_key = flipForm.secret_key;
+      }
+      if (flipForm.validation_token.trim()) {
+        payload.validation_token = flipForm.validation_token;
+      }
+      await api.put('/payment-settings/flip', payload);
+      toast.success('Konfigurasi Flip berhasil disimpan');
+      fetchFlip();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error?.message || 'Gagal menyimpan konfigurasi Flip');
+    } finally {
+      setFlipSaving(false);
     }
   };
 
@@ -333,6 +392,120 @@ export default function AdminPaymentSettingsPage() {
               <Button onClick={handleSaveMidtrans} disabled={midtransSaving} className="w-full sm:w-auto">
                 {midtransSaving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
                 Simpan Konfigurasi Midtrans
+              </Button>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ==================== FLIP CONFIG ==================== */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <Wallet className="h-5 w-5 text-primary" />
+            Integrasi Flip
+          </CardTitle>
+          <CardDescription>Konfigurasi payment gateway Flip untuk pembayaran otomatis</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {flipLoading ? (
+            <div className="flex justify-center py-8">
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : (
+            <div className="space-y-5 max-w-lg">
+              {/* Enable toggle */}
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label className="text-sm font-medium">Aktifkan Flip</Label>
+                  <p className="text-xs text-muted-foreground">Aktifkan pembayaran otomatis via Flip</p>
+                </div>
+                <Switch
+                  checked={flipForm.is_enabled}
+                  onCheckedChange={(checked) => setFlipForm({ ...flipForm, is_enabled: checked })}
+                />
+              </div>
+
+              {/* Environment */}
+              <div className="space-y-2">
+                <Label>Environment</Label>
+                <div className="flex gap-3">
+                  {['sandbox', 'production'].map((env) => (
+                    <Button
+                      key={env}
+                      variant={flipForm.environment === env ? 'default' : 'outline'}
+                      size="sm"
+                      onClick={() => setFlipForm({ ...flipForm, environment: env })}
+                    >
+                      {env === 'sandbox' ? 'Sandbox (Testing)' : 'Production'}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Secret Key */}
+              <div className="space-y-2">
+                <Label>Secret Key</Label>
+                <div className="relative">
+                  <Input
+                    type={showFlipSecret ? 'text' : 'password'}
+                    value={flipForm.secret_key}
+                    onChange={(e) => setFlipForm({ ...flipForm, secret_key: e.target.value })}
+                    placeholder={flipConfig?.secret_key_set ? 'Biarkan kosong jika tidak ingin mengubah' : 'Masukkan Secret Key...'}
+                  />
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7"
+                    onClick={() => setShowFlipSecret(!showFlipSecret)}
+                    type="button"
+                  >
+                    {showFlipSecret ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                  </Button>
+                </div>
+                {flipConfig?.secret_key_set && (
+                  <p className="text-xs text-muted-foreground">Secret Key sudah diset: {flipConfig.secret_key}</p>
+                )}
+              </div>
+
+              {/* Validation Token */}
+              <div className="space-y-2">
+                <Label>Validation Token</Label>
+                <div className="relative">
+                  <Input
+                    type={showFlipToken ? 'text' : 'password'}
+                    value={flipForm.validation_token}
+                    onChange={(e) => setFlipForm({ ...flipForm, validation_token: e.target.value })}
+                    placeholder={flipConfig?.validation_token_set ? 'Biarkan kosong jika tidak ingin mengubah' : 'Masukkan Validation Token...'}
+                  />
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7"
+                    onClick={() => setShowFlipToken(!showFlipToken)}
+                    type="button"
+                  >
+                    {showFlipToken ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                  </Button>
+                </div>
+                {flipConfig?.validation_token_set && (
+                  <p className="text-xs text-muted-foreground">Validation Token sudah diset: {flipConfig.validation_token}</p>
+                )}
+                <p className="text-xs text-muted-foreground">Token ini didapat dari dashboard Flip, digunakan untuk verifikasi callback.</p>
+              </div>
+
+              <div className="rounded-lg border border-blue-200 bg-blue-50 p-3">
+                <p className="text-xs text-blue-700">
+                  <strong>Callback URL:</strong> Masukkan URL berikut di dashboard Flip sebagai webhook/callback URL:
+                </p>
+                <code className="mt-1 block text-xs font-mono text-blue-800 bg-blue-100 rounded px-2 py-1">
+                  {typeof window !== 'undefined' ? `${window.location.origin}/api/webhook/flip` : '/api/webhook/flip'}
+                </code>
+              </div>
+
+              <Button onClick={handleSaveFlip} disabled={flipSaving} className="w-full sm:w-auto">
+                {flipSaving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
+                Simpan Konfigurasi Flip
               </Button>
             </div>
           )}

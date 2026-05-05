@@ -15,5 +15,13 @@ until npx prisma db push --url "$DATABASE_URL" --accept-data-loss 2>&1; do
 done
 echo "✅ Database schema synced"
 
+# Seed subscription plans (idempotent)
+echo "🌱 Seeding subscription plans..."
+node dist/scripts/seed-plans.js 2>&1 || echo "⚠️ Seed plans skipped/failed"
+
+# Seed super admin jika belum ada (idempotent)
+echo "🔐 Seeding super admin..."
+node dist/scripts/seed-superadmin.js 2>&1 || echo "⚠️ Seed super admin skipped/failed"
+
 echo "🚀 Starting Power WA backend..."
 exec node dist/server.js

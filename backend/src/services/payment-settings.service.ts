@@ -131,13 +131,57 @@ export class PaymentSettingsService {
     };
   }
 
+  // ===================== FLIP CONFIG =====================
+
+  /** Bulk upsert Flip config */
+  async saveFlipConfig(config: {
+    secret_key?: string;
+    validation_token?: string;
+    environment?: string; // 'sandbox' | 'production'
+    is_enabled?: string;  // 'true' | 'false'
+  }) {
+    const ops: Promise<any>[] = [];
+    if (config.secret_key !== undefined) {
+      ops.push(this.upsertPaymentConfig('flip_secret_key', config.secret_key, 'Flip Secret Key'));
+    }
+    if (config.validation_token !== undefined) {
+      ops.push(this.upsertPaymentConfig('flip_validation_token', config.validation_token, 'Flip Validation Token'));
+    }
+    if (config.environment !== undefined) {
+      ops.push(this.upsertPaymentConfig('flip_environment', config.environment, 'Flip Environment'));
+    }
+    if (config.is_enabled !== undefined) {
+      ops.push(this.upsertPaymentConfig('flip_is_enabled', config.is_enabled, 'Flip Enabled'));
+    }
+    await Promise.all(ops);
+    return this.getFlipConfig();
+  }
+
+  /** Get Flip config as structured object */
+  async getFlipConfig() {
+    const rows = await prisma.paymentConfig.findMany({
+      where: { key: { startsWith: 'flip_' } },
+    });
+    const map: Record<string, string> = {};
+    for (const r of rows) map[r.key] = r.value;
+
+    return {
+      secret_key: map['flip_secret_key'] || '',
+      validation_token: map['flip_validation_token'] || '',
+      environment: map['flip_environment'] || 'sandbox',
+      is_enabled: map['flip_is_enabled'] === 'true',
+    };
+  }
+
   /** Public: get active bank accounts for tenant payment page */
   async getPublicPaymentInfo() {
     const bankAccounts = await this.listBankAccounts(true);
     const midtransEnabled = await this.getPaymentConfig('midtrans_is_enabled');
+    const flipEnabled = await this.getPaymentConfig('flip_is_enabled');
     return {
       bank_accounts: bankAccounts,
       midtrans_enabled: midtransEnabled?.value === 'true',
+      flip_enabled: flipEnabled?.value === 'true',
     };
   }
 

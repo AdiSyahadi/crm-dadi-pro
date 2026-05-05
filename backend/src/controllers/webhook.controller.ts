@@ -7,6 +7,7 @@ import { conversationService } from '../services/conversation.service';
 import { paymentCallbackService } from '../services/payment-callback.service';
 import { midtransService } from '../services/midtrans.service';
 import crypto from 'crypto';
+import { flipService } from '../services/flip.service';
 
 export class WebhookController {
   async handleWebhook(req: Request, res: Response, _next: NextFunction): Promise<void> {
@@ -247,6 +248,44 @@ export class WebhookController {
     } catch (err: any) {
       console.error(`❌ payment-callback failed: ${err.message}`);
       res.status(500).json({ error: err.message || 'Failed to process payment' });
+    }
+  }
+
+  /**
+   * POST /api/webhook/flip
+   *
+   * Flip payment callback handler.
+   * Flip sends this when a bill payment status changes.
+   * Verified by validation_token configured in Flip dashboard.
+   */
+  async handleFlipCallback(req: Request, res: Response, _next: NextFunction): Promise<void> {
+    // Respond 200 immediately — Flip retries if non-200
+    res.status(200).json({ received: true });
+
+    try {
+      // Flip sends data as JSON string in 'data' field (form-urlencoded)
+      let payload = req.body;
+      if (typeof payload.data === 'string') {
+        try {
+          payload = JSON.parse(payload.data);
+        } catch {
+          // payload is already parsed
+        }
+      }
+
+      if (!payload.id && !payload.bill_link_id) {
+        console.warn('⚠️ Flip callback: missing id/bill_link_id');
+        return;
+      }
+
+      console.log(`📥 Flip callback: id=${payload.id || payload.bill_link_id}, status=${payload.status}`);
+
+      const result = await flipService.handleCallback(payload);
+      if (!result.success) {
+        console.warn(`⚠️ Flip callback processing: ${result.message}`);
+      }
+    } catch (error: any) {
+      console.error(`❌ Flip callback error: ${error.message}`);
     }
   }
 

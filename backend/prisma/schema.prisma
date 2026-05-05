@@ -828,6 +828,10 @@ model Deal {
   midtrans_snap_url     String?   @db.Text
   midtrans_payment_type String?
 
+  flip_order_id  String?   @unique
+  flip_link_id   String?
+  flip_link_url  String?   @db.Text
+
   rotten_notified_at DateTime?
 
   created_at DateTime @default(now())

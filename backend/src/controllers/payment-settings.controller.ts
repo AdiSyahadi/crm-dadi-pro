@@ -67,6 +67,34 @@ export class PaymentSettingsController {
     }
   }
 
+  // ===================== FLIP CONFIG =====================
+
+  async getFlipConfig(req: Request, res: Response, next: NextFunction) {
+    try {
+      const config = await paymentSettingsService.getFlipConfig();
+      // Mask secret key for security
+      const masked = {
+        ...config,
+        secret_key: config.secret_key ? '••••••••' + config.secret_key.slice(-6) : '',
+        secret_key_set: !!config.secret_key,
+        validation_token: config.validation_token ? '••••••••' + config.validation_token.slice(-6) : '',
+        validation_token_set: !!config.validation_token,
+      };
+      res.json({ success: true, data: masked });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async saveFlipConfig(req: Request, res: Response, next: NextFunction) {
+    try {
+      const config = await paymentSettingsService.saveFlipConfig(req.body);
+      res.json({ success: true, data: config, message: 'Konfigurasi Flip berhasil disimpan' });
+    } catch (error) {
+      next(error);
+    }
+  }
+
   // ===================== PUBLIC: Payment info for tenants =====================
 
   async getPublicPaymentInfo(req: Request, res: Response, next: NextFunction) {

@@ -1,0 +1,186 @@
+root@srv1622729:~/crm-dadi-pro# docker compose ps
+WARN[0000] /root/crm-dadi-pro/docker-compose.yml: the attribute `version` is obsolete, it will be ignored, please remove it to avoid potential confusion 
+NAME           IMAGE                   COMMAND                  SERVICE    CREATED         STATUS                   PORTS
+crm-backend    crm-dadi-pro-backend    "./docker-entrypoint…"   backend    2 minutes ago   Up 10 seconds            0.0.0.0:5000->5000/tcp, [::]:5000->5000/tcp
+crm-frontend   crm-dadi-pro-frontend   "docker-entrypoint.s…"   frontend   2 minutes ago   Up 2 minutes             0.0.0.0:3002->3002/tcp, [::]:3002->3002/tcp
+crm-mysql      mysql:8.0               "docker-entrypoint.s…"   mysql      2 minutes ago   Up 2 minutes (healthy)   33060/tcp, 0.0.0.0:3308->3306/tcp, [::]:3308->3306/tcp
+crm-redis      redis:7-alpine          "docker-entrypoint.s…"   redis      2 minutes ago   Up 2 minutes (healthy)   0.0.0.0:6380->6379/tcp, [::]:6380->6379/tcp
+root@srv1622729:~/crm-dadi-pro# docker compose logs backend --tail=100
+WARN[0000] /root/crm-dadi-pro/docker-compose.yml: the attribute `version` is obsolete, it will be ignored, please remove it to avoid potential confusion 
+crm-backend  | Prisma schema loaded from prisma/schema.prisma.
+crm-backend  | Datasource "db": MySQL database "crm_dadi" at "mysql:3306"
+crm-backend  | 
+crm-backend  | Error: P1000: Authentication failed against database server, the provided database credentials for `root` are not valid.
+crm-backend  | 
+crm-backend  | Please make sure to provide valid database credentials for the database server at the configured address.
+crm-backend  | ⚠️ Prisma db push failed (attempt 1/3), retrying in 5s...
+crm-backend  | Loaded Prisma config from prisma.config.ts.
+crm-backend  | 
+crm-backend  | Prisma schema loaded from prisma/schema.prisma.
+crm-backend  | Datasource "db": MySQL database "crm_dadi" at "mysql:3306"
+crm-backend  | 
+crm-backend  | Error: P1000: Authentication failed against database server, the provided database credentials for `root` are not valid.
+crm-backend  | 
+crm-backend  | Please make sure to provide valid database credentials for the database server at the configured address.
+crm-backend  | ⚠️ Prisma db push failed (attempt 2/3), retrying in 5s...
+crm-backend  | Loaded Prisma config from prisma.config.ts.
+crm-backend  | 
+crm-backend  | Prisma schema loaded from prisma/schema.prisma.
+crm-backend  | Datasource "db": MySQL database "crm_dadi" at "mysql:3306"
+crm-backend  | 
+crm-backend  | Error: P1000: Authentication failed against database server, the provided database credentials for `root` are not valid.
+crm-backend  | 
+crm-backend  | Please make sure to provide valid database credentials for the database server at the configured address.
+crm-backend  | ❌ Prisma db push failed after 3 attempts. Exiting.
+crm-backend  | 🔄 Running Prisma db push (sync schema to database)...
+crm-backend  | Loaded Prisma config from prisma.config.ts.
+crm-backend  | 
+crm-backend  | Prisma schema loaded from prisma/schema.prisma.
+crm-backend  | Datasource "db": MySQL database "crm_dadi" at "mysql:3306"
+crm-backend  | 
+crm-backend  | Error: P1000: Authentication failed against database server, the provided database credentials for `root` are not valid.
+crm-backend  | 
+crm-backend  | Please make sure to provide valid database credentials for the database server at the configured address.
+crm-backend  | ⚠️ Prisma db push failed (attempt 1/3), retrying in 5s...
+crm-backend  | Loaded Prisma config from prisma.config.ts.
+crm-backend  | 
+crm-backend  | Prisma schema loaded from prisma/schema.prisma.
+crm-backend  | Datasource "db": MySQL database "crm_dadi" at "mysql:3306"
+crm-backend  | 
+crm-backend  | Error: P1000: Authentication failed against database server, the provided database credentials for `root` are not valid.
+crm-backend  | 
+crm-backend  | Please make sure to provide valid database credentials for the database server at the configured address.
+crm-backend  | ⚠️ Prisma db push failed (attempt 2/3), retrying in 5s...
+crm-backend  | Loaded Prisma config from prisma.config.ts.
+crm-backend  | 
+crm-backend  | Prisma schema loaded from prisma/schema.prisma.
+crm-backend  | Datasource "db": MySQL database "crm_dadi" at "mysql:3306"
+crm-backend  | 
+crm-backend  | Error: P1000: Authentication failed against database server, the provided database credentials for `root` are not valid.
+crm-backend  | 
+crm-backend  | Please make sure to provide valid database credentials for the database server at the configured address.
+crm-backend  | ❌ Prisma db push failed after 3 attempts. Exiting.
+crm-backend  | 🔄 Running Prisma db push (sync schema to database)...
+crm-backend  | Loaded Prisma config from prisma.config.ts.
+crm-backend  | 
+crm-backend  | Prisma schema loaded from prisma/schema.prisma.
+crm-backend  | Datasource "db": MySQL database "crm_dadi" at "mysql:3306"
+crm-backend  | 
+crm-backend  | Error: P1000: Authentication failed against database server, the provided database credentials for `root` are not valid.
+crm-backend  | 
+crm-backend  | Please make sure to provide valid database credentials for the database server at the configured address.
+crm-backend  | ⚠️ Prisma db push failed (attempt 1/3), retrying in 5s...
+crm-backend  | Loaded Prisma config from prisma.config.ts.
+crm-backend  | 
+crm-backend  | Prisma schema loaded from prisma/schema.prisma.
+crm-backend  | Datasource "db": MySQL database "crm_dadi" at "mysql:3306"
+crm-backend  | 
+crm-backend  | Error: P1000: Authentication failed against database server, the provided database credentials for `root` are not valid.
+crm-backend  | 
+crm-backend  | Please make sure to provide valid database credentials for the database server at the configured address.
+crm-backend  | ⚠️ Prisma db push failed (attempt 2/3), retrying in 5s...
+crm-backend  | Loaded Prisma config from prisma.config.ts.
+crm-backend  | 
+crm-backend  | Prisma schema loaded from prisma/schema.prisma.
+crm-backend  | Datasource "db": MySQL database "crm_dadi" at "mysql:3306"
+crm-backend  | 
+crm-backend  | Error: P1000: Authentication failed against database server, the provided database credentials for `root` are not valid.
+crm-backend  | 
+crm-backend  | Please make sure to provide valid database credentials for the database server at the configured address.
+crm-backend  | ❌ Prisma db push failed after 3 attempts. Exiting.
+crm-backend  | 🔄 Running Prisma db push (sync schema to database)...
+crm-backend  | Loaded Prisma config from prisma.config.ts.
+crm-backend  | 
+crm-backend  | Prisma schema loaded from prisma/schema.prisma.
+crm-backend  | Datasource "db": MySQL database "crm_dadi" at "mysql:3306"
+crm-backend  | 
+crm-backend  | Error: P1000: Authentication failed against database server, the provided database credentials for `root` are not valid.
+crm-backend  | 
+crm-backend  | Please make sure to provide valid database credentials for the database server at the configured address.
+crm-backend  | ⚠️ Prisma db push failed (attempt 1/3), retrying in 5s...
+crm-backend  | Loaded Prisma config from prisma.config.ts.
+crm-backend  | 
+crm-backend  | Prisma schema loaded from prisma/schema.prisma.
+crm-backend  | Datasource "db": MySQL database "crm_dadi" at "mysql:3306"
+crm-backend  | 
+crm-backend  | Error: P1000: Authentication failed against database server, the provided database credentials for `root` are not valid.
+crm-backend  | 
+crm-backend  | Please make sure to provide valid database credentials for the database server at the configured address.
+crm-backend  | ⚠️ Prisma db push failed (attempt 2/3), retrying in 5s...
+root@srv1622729:~/crm-dadi-pro# docker compose logs mysql --tail=50
+WARN[0000] /root/crm-dadi-pro/docker-compose.yml: the attribute `version` is obsolete, it will be ignored, please remove it to avoid potential confusion 
+crm-mysql  | 2026-05-04 23:24:36+00:00 [Note] [Entrypoint]: Entrypoint script for MySQL Server 8.0.46-1.el9 started.
+crm-mysql  | 2026-05-04 23:24:36+00:00 [Note] [Entrypoint]: Switching to dedicated user 'mysql'
+crm-mysql  | 2026-05-04 23:24:36+00:00 [Note] [Entrypoint]: Entrypoint script for MySQL Server 8.0.46-1.el9 started.
+crm-mysql  | '/var/lib/mysql/mysql.sock' -> '/var/run/mysqld/mysqld.sock'
+crm-mysql  | 2026-05-04T23:24:37.337886Z 0 [Warning] [MY-011068] [Server] The syntax '--skip-host-cache' is deprecated and will be removed in a future release. Please use SET GLOBAL host_cache_size=0 instead.
+crm-mysql  | 2026-05-04T23:24:37.340414Z 0 [System] [MY-010116] [Server] /usr/sbin/mysqld (mysqld 8.0.46) starting as process 1
+crm-mysql  | 2026-05-04T23:24:37.346533Z 1 [System] [MY-013576] [InnoDB] InnoDB initialization has started.
+crm-mysql  | 2026-05-04T23:24:37.628619Z 1 [System] [MY-013577] [InnoDB] InnoDB initialization has ended.
+crm-mysql  | 2026-05-04T23:24:37.782933Z 0 [Warning] [MY-010068] [Server] CA certificate ca.pem is self signed.
+crm-mysql  | 2026-05-04T23:24:37.782965Z 0 [System] [MY-013602] [Server] Channel mysql_main configured to support TLS. Encrypted connections are now supported for this channel.
+crm-mysql  | 2026-05-04T23:24:37.785083Z 0 [Warning] [MY-011810] [Server] Insecure configuration for --pid-file: Location '/var/run/mysqld' in the path is accessible to all OS users. Consider choosing a different directory.
+crm-mysql  | 2026-05-04T23:24:37.804673Z 0 [System] [MY-011323] [Server] X Plugin ready for connections. Bind-address: '::' port: 33060, socket: /var/run/mysqld/mysqlx.sock
+crm-mysql  | 2026-05-04T23:24:37.804697Z 0 [System] [MY-010931] [Server] /usr/sbin/mysqld: ready for connections. Version: '8.0.46'  socket: '/var/run/mysqld/mysqld.sock'  port: 3306  MySQL Community Server - GPL.
+root@srv1622729:~/crm-dadi-pro# cat /etc/nginx/sites-enabled/crm.abdashboard.com
+server {
+    server_name crm.abdashboard.com;
+
+    # Frontend
+    location / {
+        proxy_pass http://127.0.0.1:3002;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+    }
+
+    # Backend API
+    location /api/ {
+        proxy_pass http://127.0.0.1:5000/api/;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+        client_max_body_size 100M;
+    }
+
+    # Socket.IO
+    location /socket.io/ {
+        proxy_pass http://127.0.0.1:5000/socket.io/;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    listen 443 ssl; # managed by Certbot
+    ssl_certificate /etc/letsencrypt/live/crm.abdashboard.com/fullchain.pem; # managed by Certbot
+    ssl_certificate_key /etc/letsencrypt/live/crm.abdashboard.com/privkey.pem; # managed by Certbot
+    include /etc/letsencrypt/options-ssl-nginx.conf; # managed by Certbot
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem; # managed by Certbot
+
+}
+server {
+    if ($host = crm.abdashboard.com) {
+        return 301 https://$host$request_uri;
+    } # managed by Certbot
+
+
+    listen 80;
+    server_name crm.abdashboard.com;
+    return 404; # managed by Certbot
+
+
+}root@srv1622729:~/crm-dadi-pro#

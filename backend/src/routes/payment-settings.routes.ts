@@ -21,7 +21,13 @@ router.get('/midtrans', authenticate, requireSuperAdmin,
 router.put('/midtrans', authenticate, requireSuperAdmin,
   (req, res, next) => paymentSettingsController.saveMidtransConfig(req, res, next));
 
-// === Public: Payment info (bank accounts + midtrans status) — for tenant billing page ===
+// === Admin: Flip Config ===
+router.get('/flip', authenticate, requireSuperAdmin,
+  (req, res, next) => paymentSettingsController.getFlipConfig(req, res, next));
+router.put('/flip', authenticate, requireSuperAdmin,
+  (req, res, next) => paymentSettingsController.saveFlipConfig(req, res, next));
+
+// === Public: Payment info (bank accounts + midtrans/flip status) — for tenant billing page ===
 router.get('/public', authenticate,
   (req, res, next) => paymentSettingsController.getPublicPaymentInfo(req, res, next));
 

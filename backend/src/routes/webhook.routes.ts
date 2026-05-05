@@ -15,4 +15,7 @@ router.post('/payment-callback', webhookController.handlePaymentCallback);
 // Midtrans payment notification - no auth header, verified by SHA-512 signature in body
 router.post('/midtrans', webhookController.handleMidtransNotification);
 
+// Flip payment callback - no auth header, verified by validation_token
+router.post('/flip', webhookController.handleFlipCallback);
+
 export default router;
