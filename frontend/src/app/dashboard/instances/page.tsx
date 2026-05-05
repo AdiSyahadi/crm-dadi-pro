@@ -132,6 +132,9 @@ export default function InstancesPage() {
       queryClient.invalidateQueries({ queryKey: ['instances'] });
       toast.success('Instansi dihapus');
     },
+    onError: (err: any) => {
+      toast.error(err.response?.data?.error?.message || 'Gagal menghapus instansi');
+    },
   });
 
   const reconnectMutation = useMutation({

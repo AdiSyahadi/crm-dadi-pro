@@ -6,7 +6,7 @@ import { CreateInstanceInput, UpdateInstanceInput } from '../validators/wa-insta
 export class WAInstanceService {
   async list(organizationId: string) {
     const instances = await prisma.wAInstance.findMany({
-      where: { organization_id: organizationId },
+      where: { organization_id: organizationId, deleted_at: null },
       orderBy: { created_at: 'desc' },
     });
 
@@ -44,7 +44,7 @@ export class WAInstanceService {
 
   async getById(organizationId: string, instanceId: string) {
     const instance = await prisma.wAInstance.findFirst({
-      where: { id: instanceId, organization_id: organizationId },
+      where: { id: instanceId, organization_id: organizationId, deleted_at: null },
     });
 
     if (!instance) {
@@ -60,6 +60,7 @@ export class WAInstanceService {
       where: {
         organization_id: organizationId,
         wa_instance_id: input.wa_instance_id,
+        deleted_at: null,
       },
     });
 
@@ -134,7 +135,10 @@ export class WAInstanceService {
 
   async delete(organizationId: string, instanceId: string) {
     const existing = await this.getById(organizationId, instanceId);
-    await prisma.wAInstance.delete({ where: { id: existing.id } });
+    await prisma.wAInstance.update({
+      where: { id: existing.id },
+      data: { deleted_at: new Date() },
+    });
   }
 
   async getStatus(organizationId: string, instanceId: string) {

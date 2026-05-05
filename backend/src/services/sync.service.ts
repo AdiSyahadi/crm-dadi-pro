@@ -458,7 +458,7 @@ export class SyncService {
     setInterval(async () => {
       try {
         const instances = await prisma.wAInstance.findMany({
-          where: { status: 'CONNECTED' },
+          where: { status: 'CONNECTED', deleted_at: null },
         });
         for (const inst of instances) {
           try {
