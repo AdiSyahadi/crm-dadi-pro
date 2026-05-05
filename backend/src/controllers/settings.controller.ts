@@ -284,6 +284,43 @@ export class SettingsController {
     }
   }
 
+  // GET /api/settings/flip
+  async getFlipConfig(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const role = req.user!.role;
+      if (role !== 'OWNER' && role !== 'ADMIN' && role !== 'SUPER_ADMIN') {
+        throw AppError.forbidden('Hanya OWNER atau ADMIN yang dapat mengakses konfigurasi Flip');
+      }
+
+      const config = await paymentSettingsService.getFlipConfig();
+      const masked = {
+        ...config,
+        secret_key: config.secret_key ? '••••••••' + config.secret_key.slice(-6) : '',
+        secret_key_set: !!config.secret_key,
+        validation_token: config.validation_token ? '••••••••' + config.validation_token.slice(-6) : '',
+        validation_token_set: !!config.validation_token,
+      };
+      sendSuccess(res, masked);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // PUT /api/settings/flip
+  async saveFlipConfig(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const role = req.user!.role;
+      if (role !== 'OWNER' && role !== 'ADMIN' && role !== 'SUPER_ADMIN') {
+        throw AppError.forbidden('Hanya OWNER atau ADMIN yang dapat mengubah konfigurasi Flip');
+      }
+
+      const config = await paymentSettingsService.saveFlipConfig(req.body);
+      sendSuccess(res, config, 'Konfigurasi Flip berhasil disimpan');
+    } catch (error) {
+      next(error);
+    }
+  }
+
   // POST /api/settings/midtrans/test
   async testMidtransConnection(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {

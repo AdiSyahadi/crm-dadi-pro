@@ -43,10 +43,12 @@ import {
   Trash2,
   Receipt,
   CreditCard,
+  Wallet,
   Save,
 } from 'lucide-react';
 import { WebhookSettings } from '@/components/settings/webhook-settings';
 import { toast } from 'sonner';
+import { FlipConfigTab } from '@/components/settings/flip-config-tab';
 
 export default function SettingsPage() {
   const user = useAuthStore((s) => s.user);
@@ -314,6 +316,10 @@ export default function SettingsPage() {
           <TabsTrigger value="midtrans">
             <CreditCard className="h-4 w-4 mr-1.5" />
             Midtrans
+          </TabsTrigger>
+          <TabsTrigger value="flip">
+            <Wallet className="h-4 w-4 mr-1.5" />
+            Flip
           </TabsTrigger>
         </TabsList>
 
@@ -843,6 +849,11 @@ export default function SettingsPage() {
         {/* Midtrans Tab */}
         <TabsContent value="midtrans" className="space-y-4">
           <MidtransConfigTab />
+        </TabsContent>
+
+        {/* Flip Tab */}
+        <TabsContent value="flip" className="space-y-4">
+          <FlipConfigTab />
         </TabsContent>
       </Tabs>
     </div>

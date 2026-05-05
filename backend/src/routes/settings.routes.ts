@@ -20,4 +20,7 @@ router.get('/midtrans', settingsController.getMidtransConfig.bind(settingsContro
 router.put('/midtrans', settingsController.saveMidtransConfig.bind(settingsController));
 router.post('/midtrans/test', settingsController.testMidtransConnection.bind(settingsController));
 
+router.get('/flip', settingsController.getFlipConfig.bind(settingsController));
+router.put('/flip', settingsController.saveFlipConfig.bind(settingsController));
+
 export default router;
